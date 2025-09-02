@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Threat Intelligence IOC Analyzer</title>
+    <link rel="stylesheet" href="static/css/style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <header class="header">
+        <div class="container">
+            <div class="logo">
+                <i class="fas fa-shield-alt"></i>
+                <h1>NSCOM03</h1>
+            </div>
+            <nav class="nav">
+                <span class="status-indicator" id="statusIndicator">
+                    <i class="fas fa-circle"></i>
+                    <span>Ready</span>
+                </span>
+            </nav>
+        </div>
+    </header>
+
+    <main class="main">
+        <div class="container">
+            <!-- Input Section -->
+            <section class="input-section">
+                <div class="section-header">
+                    <h2><i class="fas fa-search"></i> IOC Analysis</h2>
+                    <p>Enter Indicators of Compromise (IOCs) for threat intelligence analysis</p>
+                </div>
+
+                <div class="input-grid">
+                    <!-- Category 1: Fundamental Network Indicators -->
+                    <div class="input-group">
+                        <h3><i class="fas fa-network-wired"></i> Network Indicators</h3>
+                        
+                        <div class="form-group">
+                            <label for="ipAddress">IP Address (IPv4/IPv6)</label>
+                            <input type="text" id="ipAddress" placeholder="e.g., 8.8.8.8 or 2001:4860:4860::8888">
+                            <div class="input-help">Enter IPv4 or IPv6 addresses</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="domain">Domain Name</label>
+                            <input type="text" id="domain" placeholder="e.g., google.com">
+                            <div class="input-help">Enter domain names without protocol</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="url">URL</label>
+                            <input type="text" id="url" placeholder="e.g., https://example.com/path">
+                            <div class="input-help">Enter full URLs with protocol</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="cidr">CIDR Block</label>
+                            <input type="text" id="cidr" placeholder="e.g., 198.51.100.0/24">
+                            <div class="input-help">Enter IP range in CIDR notation</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="hostname">Hostname</label>
+                            <input type="text" id="hostname" placeholder="e.g., mail.google.com">
+                            <div class="input-help">Enter specific hostnames</div>
+                        </div>
+                    </div>
+
+                    <!-- Category 2: File-Based Indicators -->
+                    <div class="input-group">
+                        <h3><i class="fas fa-file-alt"></i> File Indicators</h3>
+                        
+                        <div class="form-group">
+                            <label for="hashType">Hash Type</label>
+                            <select id="hashType">
+                                <option value="md5">MD5</option>
+                                <option value="sha1">SHA-1</option>
+                                <option value="sha256" selected>SHA-256</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="fileHash">File Hash</label>
+                            <input type="text" id="fileHash" placeholder="Enter file hash">
+                            <div class="input-help">Enter hash value based on selected type</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="fileName">File Name (Optional)</label>
+                            <input type="text" id="fileName" placeholder="e.g., malware.exe">
+                            <div class="input-help">Associated filename if known</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bulk Input -->
+                <div class="bulk-input-section">
+                    <h3><i class="fas fa-list"></i> Bulk Analysis</h3>
+                    <div class="form-group">
+                        <label for="bulkInput">Bulk IOC Input</label>
+                        <textarea id="bulkInput" rows="5" placeholder="Enter multiple IOCs, one per line&#10;8.8.8.8&#10;google.com&#10;https://example.com&#10;d41d8cd98f00b204e9800998ecf8427e"></textarea>
+                        <div class="input-help">Enter multiple IOCs separated by new lines. Auto-detection will classify each type.</div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="action-buttons">
+                    <button class="btn btn-primary" id="analyzeBtn">
+                        <i class="fas fa-search"></i>
+                        Analyze IOCs
+                    </button>
+                    <button class="btn btn-secondary" id="clearBtn">
+                        <i class="fas fa-eraser"></i>
+                        Clear All
+                    </button>
+                    <button class="btn btn-info" id="validateBtn">
+                        <i class="fas fa-check-circle"></i>
+                        Validate Format
+                    </button>
+                </div>
+            </section>
+
+            <!-- Results Section -->
+            <section class="results-section" id="resultsSection" style="display: none;">
+                <div class="section-header">
+                    <h2><i class="fas fa-chart-line"></i> Analysis Results</h2>
+                    <div class="results-summary" id="resultsSummary"></div>
+                </div>
+
+                <div class="results-grid" id="resultsGrid">
+                    <!-- Results will be populated here -->
+                </div>
+
+                <div class="export-options">
+                    <button class="btn btn-export" id="exportJson">
+                        <i class="fas fa-download"></i>
+                        Export JSON
+                    </button>
+                    <button class="btn btn-export" id="exportCsv">
+                        <i class="fas fa-file-csv"></i>
+                        Export CSV
+                    </button>
+                </div>
+            </section>
+
+            <!-- API Configuration -->
+            <section class="config-section">
+                <div class="section-header">
+                    <h3><i class="fas fa-cog"></i> API Configuration</h3>
+                    <button class="btn btn-small" id="toggleConfig">
+                        <i class="fas fa-chevron-down"></i>
+                        Configure
+                    </button>
+                </div>
+                
+                <div class="config-content" id="configContent" style="display: none;">
+                    <div class="config-grid">
+                        <div class="config-item">
+                            <label for="vtApiKey">VirusTotal API Key</label>
+                            <input type="password" id="vtApiKey" placeholder="Enter API key">
+                        </div>
+                        <div class="config-item">
+                            <label for="abuseApiKey">AbuseIPDB API Key</label>
+                            <input type="password" id="abuseApiKey" placeholder="Enter API key">
+                        </div>
+                        <div class="config-item">
+                            <label for="otxApiKey">AlienVault OTX API Key</label>
+                            <input type="password" id="otxApiKey" placeholder="Enter API key">
+                        </div>
+                    </div>
+                    <div class="config-actions">
+                        <button class="btn btn-primary" id="saveConfig">
+                            <i class="fas fa-save"></i>
+                            Save Configuration
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Loading Modal -->
+    <div class="modal" id="loadingModal">
+        <div class="modal-content">
+            <div class="loading-spinner">
+                <i class="fas fa-spinner fa-spin"></i>
+            </div>
+            <h3>Analyzing IOCs...</h3>
+            <p>Please wait while we check your indicators against threat intelligence databases.</p>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2024 ThreatIntel Analyzer - Network & Data Communications Security Tool</p>
+            <div class="footer-links">
+                <span>Supported APIs: VirusTotal, AbuseIPDB, AlienVault OTX</span>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
