@@ -14,9 +14,9 @@ CORS(app)  # Enable CORS for cross-origin requests
 
 # API Configuration - Set these as environment variables
 API_KEYS = {
-    'virustotal': os.getenv('VIRUSTOTAL_API_KEY', 'your_virustotal_api_key'),
-    'abuseipdb': os.getenv('ABUSEIPDB_API_KEY', 'your_abuseipdb_api_key'),
-    'otx': os.getenv('OTX_API_KEY', 'your_otx_api_key')
+    'virustotal': os.getenv('VIRUSTOTAL_API_KEY', 'c2a46af380ec8e4900d701e3553f0d36c0689fd93642d22f519966716379cf08'),
+    'abuseipdb': os.getenv('ABUSEIPDB_API_KEY', 'be21307947901961f6b756e90b39937095b635043da7282b3710e09a859f0569bf74e6341137083c'),
+    'otx': os.getenv('OTX_API_KEY', '9388e180c71b17aac2a3390e8847b7689cce6ed12378e7ce8ecce4c86e89522a')
 }
 
 class IOCClassifier:
