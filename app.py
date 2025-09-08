@@ -101,109 +101,257 @@ class IOCClassifier:
         else:
             return 'unknown'
 
-class ThreatIntelligenceAPI:
-    """Handle API calls to various threat intelligence services"""
+class EnhancedThreatIntelligenceAPI:
+    """Enhanced API handler with relational endpoint support"""
     
     def __init__(self):
         self.session = requests.Session()
-        self.session.headers.update({'User-Agent': 'ThreatIntel-Analyzer/1.0'})
+        self.session.headers.update({'User-Agent': 'ThreatIntel-Analyzer/2.0'})
     
-    def query_virustotal_ip(self, ip: str) -> Dict[str, Any]:
-        """Query VirusTotal IP endpoint"""
+    def _make_vt_request(self, endpoint: str, params: Dict = None) -> Dict[str, Any]:
+        """Helper method to make VirusTotal API requests with error handling"""
         try:
-            url = f"https://www.virustotal.com/api/v3/ip_addresses/{ip}"
+            url = f"https://www.virustotal.com/api/v3/{endpoint}"
             headers = {'x-apikey': API_KEYS['virustotal']}
             
-            response = self.session.get(url, headers=headers, timeout=10)
+            response = self.session.get(url, headers=headers, params=params, timeout=15)
             if response.status_code == 200:
-                data = response.json()
-                stats = data.get('data', {}).get('attributes', {}).get('last_analysis_stats', {})
-                return {
-                    'source': 'VirusTotal',
-                    'malicious': stats.get('malicious', 0),
-                    'suspicious': stats.get('suspicious', 0),
-                    'clean': stats.get('harmless', 0),
-                    'total_scans': sum(stats.values()) if stats else 0,
-                    'reputation': data.get('data', {}).get('attributes', {}).get('reputation', 0),
-                    'country': data.get('data', {}).get('attributes', {}).get('country', 'Unknown')
-                }
+                return response.json()
+            elif response.status_code == 404:
+                return {'error': 'Resource not found'}
+            else:
+                return {'error': f'API returned status {response.status_code}'}
         except Exception as e:
-            return {'source': 'VirusTotal', 'error': str(e)}
-        
-        return {'source': 'VirusTotal', 'error': 'No data available'}
+            return {'error': str(e)}
     
-    def query_virustotal_domain(self, domain: str) -> Dict[str, Any]:
-        """Query VirusTotal domain endpoint"""
-        try:
-            url = f"https://www.virustotal.com/api/v3/domains/{domain}"
-            headers = {'x-apikey': API_KEYS['virustotal']}
-            
-            response = self.session.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                stats = data.get('data', {}).get('attributes', {}).get('last_analysis_stats', {})
-                return {
-                    'source': 'VirusTotal',
-                    'malicious': stats.get('malicious', 0),
-                    'suspicious': stats.get('suspicious', 0),
-                    'clean': stats.get('harmless', 0),
-                    'total_scans': sum(stats.values()) if stats else 0,
-                    'reputation': data.get('data', {}).get('attributes', {}).get('reputation', 0),
-                    'registrar': data.get('data', {}).get('attributes', {}).get('registrar', 'Unknown')
-                }
-        except Exception as e:
-            return {'source': 'VirusTotal', 'error': str(e)}
+    def query_virustotal_ip_enhanced(self, ip: str, include_relations: bool = True) -> Dict[str, Any]:
+        """Enhanced IP analysis with relational data"""
+        result = {
+            'main_report': {},
+            'associated_domains': [],
+            'communicating_files': [],
+            'downloaded_files': []
+        }
         
-        return {'source': 'VirusTotal', 'error': 'No data available'}
+        # Main IP report
+        data = self._make_vt_request(f"ip_addresses/{ip}")
+        if 'error' not in data:
+            attrs = data.get('data', {}).get('attributes', {})
+            stats = attrs.get('last_analysis_stats', {})
+            result['main_report'] = {
+                'source': 'VirusTotal',
+                'malicious': stats.get('malicious', 0),
+                'suspicious': stats.get('suspicious', 0),
+                'clean': stats.get('harmless', 0),
+                'total_scans': sum(stats.values()) if stats else 0,
+                'reputation': attrs.get('reputation', 0),
+                'country': attrs.get('country', 'Unknown'),
+                'as_owner': attrs.get('as_owner', 'Unknown'),
+                'network': attrs.get('network', 'Unknown')
+            }
+        else:
+            result['main_report'] = {'source': 'VirusTotal', 'error': data['error']}
+        
+        if not include_relations:
+            return result
+        
+        # Associated domains (resolutions)
+        domains_data = self._make_vt_request(f"ip_addresses/{ip}/resolutions", {'limit': 20})
+        if 'error' not in domains_data:
+            for item in domains_data.get('data', []):
+                attrs = item.get('attributes', {})
+                result['associated_domains'].append({
+                    'domain': attrs.get('host_name', ''),
+                    'last_resolved': attrs.get('date', ''),
+                    'resolver': attrs.get('resolver', 'Unknown')
+                })
+        
+        # Communicating files (malware traffic)
+        files_data = self._make_vt_request(f"ip_addresses/{ip}/communicating_files", {'limit': 15})
+        if 'error' not in files_data:
+            for item in files_data.get('data', []):
+                attrs = item.get('attributes', {})
+                stats = attrs.get('last_analysis_stats', {})
+                result['communicating_files'].append({
+                    'sha256': attrs.get('sha256', '')[:16] + '...',  # Truncate for display
+                    'full_hash': attrs.get('sha256', ''),
+                    'detections': stats.get('malicious', 0),
+                    'total_engines': sum(stats.values()) if stats else 0,
+                    'file_type': attrs.get('type_description', 'Unknown'),
+                    'size': attrs.get('size', 0)
+                })
+        
+        # Downloaded files
+        download_data = self._make_vt_request(f"ip_addresses/{ip}/downloaded_files", {'limit': 10})
+        if 'error' not in download_data:
+            for item in download_data.get('data', []):
+                attrs = item.get('attributes', {})
+                stats = attrs.get('last_analysis_stats', {})
+                result['downloaded_files'].append({
+                    'sha256': attrs.get('sha256', '')[:16] + '...',
+                    'full_hash': attrs.get('sha256', ''),
+                    'detections': stats.get('malicious', 0),
+                    'total_engines': sum(stats.values()) if stats else 0,
+                    'file_type': attrs.get('type_description', 'Unknown')
+                })
+        
+        return result
     
-    def query_virustotal_url(self, url: str) -> Dict[str, Any]:
-        """Query VirusTotal URL endpoint"""
-        try:
-            import base64
-            url_id = base64.urlsafe_b64encode(url.encode()).decode().strip("=")
-            api_url = f"https://www.virustotal.com/api/v3/urls/{url_id}"
-            headers = {'x-apikey': API_KEYS['virustotal']}
-            
-            response = self.session.get(api_url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                stats = data.get('data', {}).get('attributes', {}).get('last_analysis_stats', {})
-                return {
-                    'source': 'VirusTotal',
-                    'malicious': stats.get('malicious', 0),
-                    'suspicious': stats.get('suspicious', 0),
-                    'clean': stats.get('harmless', 0),
-                    'total_scans': sum(stats.values()) if stats else 0,
-                    'final_url': data.get('data', {}).get('attributes', {}).get('last_final_url', url)
-                }
-        except Exception as e:
-            return {'source': 'VirusTotal', 'error': str(e)}
+    def query_virustotal_domain_enhanced(self, domain: str, include_relations: bool = True) -> Dict[str, Any]:
+        """Enhanced domain analysis with relational data"""
+        result = {
+            'main_report': {},
+            'associated_ips': [],
+            'subdomains': [],
+            'communicating_files': [],
+            'urls': []
+        }
         
-        return {'source': 'VirusTotal', 'error': 'No data available'}
+        # Main domain report
+        data = self._make_vt_request(f"domains/{domain}")
+        if 'error' not in data:
+            attrs = data.get('data', {}).get('attributes', {})
+            stats = attrs.get('last_analysis_stats', {})
+            result['main_report'] = {
+                'source': 'VirusTotal',
+                'malicious': stats.get('malicious', 0),
+                'suspicious': stats.get('suspicious', 0),
+                'clean': stats.get('harmless', 0),
+                'total_scans': sum(stats.values()) if stats else 0,
+                'reputation': attrs.get('reputation', 0),
+                'registrar': attrs.get('registrar', 'Unknown'),
+                'creation_date': attrs.get('creation_date', 'Unknown'),
+                'whois_date': attrs.get('whois_date', 'Unknown')
+            }
+        else:
+            result['main_report'] = {'source': 'VirusTotal', 'error': data['error']}
+        
+        if not include_relations:
+            return result
+        
+        # Associated IPs (resolutions)
+        ips_data = self._make_vt_request(f"domains/{domain}/resolutions", {'limit': 20})
+        if 'error' not in ips_data:
+            for item in ips_data.get('data', []):
+                attrs = item.get('attributes', {})
+                result['associated_ips'].append({
+                    'ip': attrs.get('ip_address', ''),
+                    'last_resolved': attrs.get('date', ''),
+                    'resolver': attrs.get('resolver', 'Unknown')
+                })
+        
+        # Subdomains
+        subdomains_data = self._make_vt_request(f"domains/{domain}/subdomains", {'limit': 15})
+        if 'error' not in subdomains_data:
+            for item in subdomains_data.get('data', []):
+                result['subdomains'].append({
+                    'subdomain': item.get('id', ''),
+                    'last_seen': item.get('attributes', {}).get('last_modification_date', 'Unknown')
+                })
+        
+        # Communicating files
+        files_data = self._make_vt_request(f"domains/{domain}/communicating_files", {'limit': 15})
+        if 'error' not in files_data:
+            for item in files_data.get('data', []):
+                attrs = item.get('attributes', {})
+                stats = attrs.get('last_analysis_stats', {})
+                result['communicating_files'].append({
+                    'sha256': attrs.get('sha256', '')[:16] + '...',
+                    'full_hash': attrs.get('sha256', ''),
+                    'detections': stats.get('malicious', 0),
+                    'total_engines': sum(stats.values()) if stats else 0,
+                    'file_type': attrs.get('type_description', 'Unknown')
+                })
+        
+        # Associated URLs
+        urls_data = self._make_vt_request(f"domains/{domain}/urls", {'limit': 10})
+        if 'error' not in urls_data:
+            for item in urls_data.get('data', []):
+                attrs = item.get('attributes', {})
+                stats = attrs.get('last_analysis_stats', {})
+                result['urls'].append({
+                    'url': attrs.get('url', '')[:50] + '...' if len(attrs.get('url', '')) > 50 else attrs.get('url', ''),
+                    'full_url': attrs.get('url', ''),
+                    'detections': stats.get('malicious', 0),
+                    'total_engines': sum(stats.values()) if stats else 0
+                })
+        
+        return result
     
-    def query_virustotal_hash(self, file_hash: str) -> Dict[str, Any]:
-        """Query VirusTotal file hash endpoint"""
-        try:
-            url = f"https://www.virustotal.com/api/v3/files/{file_hash}"
-            headers = {'x-apikey': API_KEYS['virustotal']}
-            
-            response = self.session.get(url, headers=headers, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                stats = data.get('data', {}).get('attributes', {}).get('last_analysis_stats', {})
-                return {
-                    'source': 'VirusTotal',
-                    'malicious': stats.get('malicious', 0),
-                    'suspicious': stats.get('suspicious', 0),
-                    'clean': stats.get('harmless', 0),
-                    'total_scans': sum(stats.values()) if stats else 0,
-                    'file_type': data.get('data', {}).get('attributes', {}).get('type_description', 'Unknown'),
-                    'file_size': data.get('data', {}).get('attributes', {}).get('size', 0)
-                }
-        except Exception as e:
-            return {'source': 'VirusTotal', 'error': str(e)}
+    def query_virustotal_hash_enhanced(self, file_hash: str, include_relations: bool = True) -> Dict[str, Any]:
+        """Enhanced hash analysis with network behavior"""
+        result = {
+            'main_report': {},
+            'contacted_ips': [],
+            'contacted_domains': [],
+            'contacted_urls': []
+        }
         
-        return {'source': 'VirusTotal', 'error': 'No data available'}
+        # Main file report
+        data = self._make_vt_request(f"files/{file_hash}")
+        if 'error' not in data:
+            attrs = data.get('data', {}).get('attributes', {})
+            stats = attrs.get('last_analysis_stats', {})
+            result['main_report'] = {
+                'source': 'VirusTotal',
+                'malicious': stats.get('malicious', 0),
+                'suspicious': stats.get('suspicious', 0),
+                'clean': stats.get('harmless', 0),
+                'total_scans': sum(stats.values()) if stats else 0,
+                'file_type': attrs.get('type_description', 'Unknown'),
+                'file_size': attrs.get('size', 0),
+                'md5': attrs.get('md5', ''),
+                'sha1': attrs.get('sha1', ''),
+                'sha256': attrs.get('sha256', ''),
+                'first_submission': attrs.get('first_submission_date', 'Unknown')
+            }
+        else:
+            result['main_report'] = {'source': 'VirusTotal', 'error': data['error']}
+        
+        if not include_relations:
+            return result
+        
+        # Contacted IPs
+        ips_data = self._make_vt_request(f"files/{file_hash}/contacted_ips", {'limit': 20})
+        if 'error' not in ips_data:
+            for item in ips_data.get('data', []):
+                attrs = item.get('attributes', {})
+                stats = attrs.get('last_analysis_stats', {})
+                result['contacted_ips'].append({
+                    'ip': item.get('id', ''),
+                    'country': attrs.get('country', 'Unknown'),
+                    'as_owner': attrs.get('as_owner', 'Unknown'),
+                    'detections': stats.get('malicious', 0),
+                    'reputation': attrs.get('reputation', 0)
+                })
+        
+        # Contacted domains
+        domains_data = self._make_vt_request(f"files/{file_hash}/contacted_domains", {'limit': 20})
+        if 'error' not in domains_data:
+            for item in domains_data.get('data', []):
+                attrs = item.get('attributes', {})
+                stats = attrs.get('last_analysis_stats', {})
+                result['contacted_domains'].append({
+                    'domain': item.get('id', ''),
+                    'detections': stats.get('malicious', 0),
+                    'reputation': attrs.get('reputation', 0),
+                    'registrar': attrs.get('registrar', 'Unknown')
+                })
+        
+        # Contacted URLs
+        urls_data = self._make_vt_request(f"files/{file_hash}/contacted_urls", {'limit': 15})
+        if 'error' not in urls_data:
+            for item in urls_data.get('data', []):
+                attrs = item.get('attributes', {})
+                stats = attrs.get('last_analysis_stats', {})
+                result['contacted_urls'].append({
+                    'url': attrs.get('url', '')[:60] + '...' if len(attrs.get('url', '')) > 60 else attrs.get('url', ''),
+                    'full_url': attrs.get('url', ''),
+                    'detections': stats.get('malicious', 0),
+                    'total_engines': sum(stats.values()) if stats else 0
+                })
+        
+        return result
     
     def query_abuseipdb(self, ip: str) -> Dict[str, Any]:
         """Query AbuseIPDB for IP reputation"""
@@ -236,134 +384,94 @@ class ThreatIntelligenceAPI:
             return {'source': 'AbuseIPDB', 'error': str(e)}
         
         return {'source': 'AbuseIPDB', 'error': 'No data available'}
-    
-    def query_abuseipdb_cidr(self, cidr: str) -> Dict[str, Any]:
-        """Query AbuseIPDB for CIDR block"""
-        try:
-            url = 'https://api.abuseipdb.com/api/v2/check-block'
-            headers = {
-                'Key': API_KEYS['abuseipdb'],
-                'Accept': 'application/json'
-            }
-            params = {
-                'network': cidr,
-                'maxAgeInDays': 90
-            }
-            
-            response = self.session.get(url, headers=headers, params=params, timeout=10)
-            if response.status_code == 200:
-                data = response.json().get('data', {})
-                return {
-                    'source': 'AbuseIPDB',
-                    'network_address': data.get('networkAddress', cidr),
-                    'num_possible_hosts': data.get('numPossibleHosts', 0),
-                    'address_space_desc': data.get('addressSpaceDesc', 'Unknown'),
-                    'reported_address_count': len(data.get('reportedAddress', []))
-                }
-        except Exception as e:
-            return {'source': 'AbuseIPDB', 'error': str(e)}
-        
-        return {'source': 'AbuseIPDB', 'error': 'No data available'}
 
-class IOCAnalyzer:
-    """Main analyzer class that coordinates IOC analysis"""
+class EnhancedIOCAnalyzer:
+    """Enhanced analyzer with relational intelligence"""
     
     def __init__(self):
-        self.api = ThreatIntelligenceAPI()
+        self.api = EnhancedThreatIntelligenceAPI()
     
-    def analyze_ip(self, ip: str) -> Dict[str, Any]:
-        """Analyze an IP address"""
+    def analyze_ip(self, ip: str, include_relations: bool = True) -> Dict[str, Any]:
+        """Enhanced IP analysis with relational data"""
         results = {
             'ioc': ip,
             'type': 'ip',
-            'results': []
+            'main_analysis': {},
+            'relational_data': {},
+            'additional_sources': []
         }
         
-        # Query VirusTotal
-        vt_result = self.api.query_virustotal_ip(ip)
-        results['results'].append(vt_result)
+        # VirusTotal enhanced analysis
+        vt_result = self.api.query_virustotal_ip_enhanced(ip, include_relations)
+        results['main_analysis'] = vt_result['main_report']
         
-        # Query AbuseIPDB
+        if include_relations:
+            results['relational_data'] = {
+                'associated_domains': vt_result['associated_domains'],
+                'communicating_files': vt_result['communicating_files'],
+                'downloaded_files': vt_result['downloaded_files']
+            }
+        
+        # AbuseIPDB analysis
         abuse_result = self.api.query_abuseipdb(ip)
-        results['results'].append(abuse_result)
+        results['additional_sources'].append(abuse_result)
         
-        # Add rate limiting delay
+        # Add rate limiting
         time.sleep(0.5)
         
         return results
     
-    def analyze_domain(self, domain: str) -> Dict[str, Any]:
-        """Analyze a domain name"""
+    def analyze_domain(self, domain: str, include_relations: bool = True) -> Dict[str, Any]:
+        """Enhanced domain analysis with relational data"""
         results = {
             'ioc': domain,
             'type': 'domain',
-            'results': []
+            'main_analysis': {},
+            'relational_data': {}
         }
         
-        # Query VirusTotal
-        vt_result = self.api.query_virustotal_domain(domain)
-        results['results'].append(vt_result)
+        # VirusTotal enhanced analysis
+        vt_result = self.api.query_virustotal_domain_enhanced(domain, include_relations)
+        results['main_analysis'] = vt_result['main_report']
         
-        # Add rate limiting delay
+        if include_relations:
+            results['relational_data'] = {
+                'associated_ips': vt_result['associated_ips'],
+                'subdomains': vt_result['subdomains'],
+                'communicating_files': vt_result['communicating_files'],
+                'associated_urls': vt_result['urls']
+            }
+        
         time.sleep(0.5)
-        
         return results
     
-    def analyze_url(self, url: str) -> Dict[str, Any]:
-        """Analyze a URL"""
-        results = {
-            'ioc': url,
-            'type': 'url',
-            'results': []
-        }
-        
-        # Query VirusTotal
-        vt_result = self.api.query_virustotal_url(url)
-        results['results'].append(vt_result)
-        
-        # Add rate limiting delay
-        time.sleep(0.5)
-        
-        return results
-    
-    def analyze_hash(self, file_hash: str) -> Dict[str, Any]:
-        """Analyze a file hash"""
+    def analyze_hash(self, file_hash: str, include_relations: bool = True) -> Dict[str, Any]:
+        """Enhanced hash analysis with network behavior"""
         hash_type = IOCClassifier.is_hash(file_hash)
         results = {
             'ioc': file_hash,
             'type': 'hash',
             'hash_type': hash_type,
-            'results': []
+            'main_analysis': {},
+            'relational_data': {}
         }
         
-        # Query VirusTotal
-        vt_result = self.api.query_virustotal_hash(file_hash)
-        results['results'].append(vt_result)
+        # VirusTotal enhanced analysis
+        vt_result = self.api.query_virustotal_hash_enhanced(file_hash, include_relations)
+        results['main_analysis'] = vt_result['main_report']
         
-        # Add rate limiting delay
+        if include_relations:
+            results['relational_data'] = {
+                'contacted_ips': vt_result['contacted_ips'],
+                'contacted_domains': vt_result['contacted_domains'],
+                'contacted_urls': vt_result['contacted_urls']
+            }
+        
         time.sleep(0.5)
-        
         return results
     
-    def analyze_cidr(self, cidr: str) -> Dict[str, Any]:
-        """Analyze a CIDR block"""
-        results = {
-            'ioc': cidr,
-            'type': 'cidr',
-            'results': []
-        }
-        
-        # Query AbuseIPDB
-        abuse_result = self.api.query_abuseipdb_cidr(cidr)
-        results['results'].append(abuse_result)
-        
-        # Add rate limiting delay
-        time.sleep(0.5)
-        
-        return results
-    
-    def analyze_ioc(self, ioc: str) -> Dict[str, Any]:
-        """Analyze any IOC by first classifying it"""
+    def analyze_ioc(self, ioc: str, include_relations: bool = True) -> Dict[str, Any]:
+        """Analyze any IOC with enhanced relational data"""
         ioc = ioc.strip()
         if not ioc:
             return {'error': 'Empty IOC provided'}
@@ -371,15 +479,23 @@ class IOCAnalyzer:
         ioc_type = IOCClassifier.classify_ioc(ioc)
         
         if ioc_type == 'ip':
-            return self.analyze_ip(ioc)
+            return self.analyze_ip(ioc, include_relations)
         elif ioc_type == 'domain':
-            return self.analyze_domain(ioc)
-        elif ioc_type == 'url':
-            return self.analyze_url(ioc)
+            return self.analyze_domain(ioc, include_relations)
         elif ioc_type == 'hash':
-            return self.analyze_hash(ioc)
-        elif ioc_type == 'cidr':
-            return self.analyze_cidr(ioc)
+            return self.analyze_hash(ioc, include_relations)
+        elif ioc_type == 'url':
+            # For URLs, extract domain and analyze that
+            try:
+                parsed = urlparse(ioc)
+                domain = parsed.netloc
+                result = self.analyze_domain(domain, include_relations)
+                result['ioc'] = ioc  # Keep original URL
+                result['type'] = 'url'
+                result['extracted_domain'] = domain
+                return result
+            except:
+                return {'ioc': ioc, 'type': 'url', 'error': 'Could not parse URL'}
         else:
             return {
                 'ioc': ioc,
@@ -387,27 +503,29 @@ class IOCAnalyzer:
                 'error': f'Unable to classify IOC: {ioc}'
             }
 
-# Initialize the analyzer
-analyzer = IOCAnalyzer()
+# Initialize the enhanced analyzer
+analyzer = EnhancedIOCAnalyzer()
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    return jsonify({'status': 'healthy', 'message': 'Threat Intelligence API is running'})
+    return jsonify({'status': 'healthy', 'message': 'Enhanced Threat Intelligence API is running'})
 
 @app.route('/analyze', methods=['POST'])
 def analyze_iocs():
-    """Main endpoint to analyze IOCs"""
+    """Enhanced endpoint to analyze IOCs with relational data"""
     try:
         data = request.get_json()
         
         if not data:
             return jsonify({'error': 'No data provided'}), 400
         
-        # Collect all IOCs from different fields
+        # Check if relational analysis is requested (default: True)
+        include_relations = data.get('include_relations', True)
+        
+        # Collect all IOCs
         iocs_to_analyze = []
         
-        # Individual field inputs
         if data.get('ip_address'):
             iocs_to_analyze.append(data['ip_address'].strip())
         
@@ -420,7 +538,6 @@ def analyze_iocs():
         if data.get('url'):
             iocs_to_analyze.append(data['url'].strip())
         
-        # Bulk IOC input
         if data.get('bulk_ioc'):
             bulk_iocs = [ioc.strip() for ioc in data['bulk_ioc'].split('\n') if ioc.strip()]
             iocs_to_analyze.extend(bulk_iocs)
@@ -435,7 +552,7 @@ def analyze_iocs():
         results = []
         for ioc in unique_iocs:
             try:
-                result = analyzer.analyze_ioc(ioc)
+                result = analyzer.analyze_ioc(ioc, include_relations)
                 results.append(result)
             except Exception as e:
                 results.append({
@@ -447,6 +564,8 @@ def analyze_iocs():
         return jsonify({
             'success': True,
             'total_analyzed': len(results),
+            'enhanced_analysis': True,
+            'includes_relations': include_relations,
             'results': results
         })
     
@@ -454,6 +573,25 @@ def analyze_iocs():
         return jsonify({
             'success': False,
             'error': f'Server error: {str(e)}'
+        }), 500
+
+@app.route('/analyze/<ioc_type>/<path:ioc_value>', methods=['GET'])
+def analyze_single_ioc(ioc_type: str, ioc_value: str):
+    """Quick analysis endpoint for individual IOCs (for interactive features)"""
+    try:
+        include_relations = request.args.get('relations', 'true').lower() == 'true'
+        
+        result = analyzer.analyze_ioc(ioc_value, include_relations)
+        
+        return jsonify({
+            'success': True,
+            'result': result
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Analysis failed: {str(e)}'
         }), 500
 
 @app.route('/classify', methods=['POST'])
@@ -503,9 +641,16 @@ if __name__ == '__main__':
         print("Set them as environment variables for full functionality.")
         print()
     
-    print("🔍 Threat Intelligence IOC Analyzer Starting...")
-    print("📍 Available endpoints:")
-    print("   - POST /analyze - Analyze IOCs")
+    print("🔍 Enhanced Threat Intelligence IOC Analyzer Starting...")
+    print("🚀 New Features:")
+    print("   - Relational IOC Analysis")
+    print("   - Associated Domains/IPs Discovery")
+    print("   - Malware Communication Patterns")
+    print("   - Network Behavior Analysis")
+    print()
+    print("📡 Available endpoints:")
+    print("   - POST /analyze - Enhanced IOC analysis with relations")
+    print("   - GET /analyze/<type>/<ioc> - Quick single IOC analysis")
     print("   - POST /classify - Classify IOC type")
     print("   - GET /health - Health check")
     print()

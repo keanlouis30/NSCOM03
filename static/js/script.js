@@ -1,9 +1,10 @@
-// Threat Intelligence IOC Analyzer - Frontend JavaScript
+// Enhanced Threat Intelligence IOC Analyzer - Frontend JavaScript
 class IOCAnalyzer {
     constructor() {
-        this.baseUrl = 'http://localhost:5000'; // Flask backend URL
+        this.baseUrl = 'http://localhost:5000';
         this.results = [];
         this.isAnalyzing = false;
+        this.includeRelations = true;
         this.init();
     }
 
@@ -26,6 +27,14 @@ class IOCAnalyzer {
         // Configuration
         document.getElementById('toggleConfig').addEventListener('click', () => this.toggleConfig());
         document.getElementById('saveConfig').addEventListener('click', () => this.saveConfig());
+
+        // Relations toggle (if exists)
+        const relationsToggle = document.getElementById('includeRelations');
+        if (relationsToggle) {
+            relationsToggle.addEventListener('change', (e) => {
+                this.includeRelations = e.target.checked;
+            });
+        }
 
         // Real-time validation on input
         const inputs = ['ipAddress', 'domain', 'url', 'cidr', 'hostname', 'fileHash'];
@@ -94,12 +103,13 @@ class IOCAnalyzer {
             file_hash: this.getInputValue('fileHash'),
             hash_type: this.getInputValue('hashType'),
             file_name: this.getInputValue('fileName'),
-            bulk_ioc: this.getInputValue('bulkInput')
+            bulk_ioc: this.getInputValue('bulkInput'),
+            include_relations: this.includeRelations
         };
 
-        // Remove empty fields
+        // Remove empty fields (except include_relations)
         Object.keys(iocs).forEach(key => {
-            if (!iocs[key]) {
+            if (key !== 'include_relations' && !iocs[key]) {
                 delete iocs[key];
             }
         });
@@ -117,8 +127,9 @@ class IOCAnalyzer {
 
         const iocs = this.collectIOCs();
         
-        // Check if any IOCs are provided
-        if (Object.keys(iocs).length === 0 || (Object.keys(iocs).length === 1 && iocs.hash_type)) {
+        // Check if any IOCs are provided (exclude include_relations from count)
+        const iocCount = Object.keys(iocs).filter(key => key !== 'include_relations' && iocs[key]).length;
+        if (iocCount === 0) {
             this.showNotification('Please enter at least one IOC to analyze.', 'warning');
             return;
         }
@@ -142,7 +153,8 @@ class IOCAnalyzer {
                 this.results = data.results;
                 this.displayResults(data);
                 this.updateStatus('Analysis Complete', 'success');
-                this.showNotification(`Successfully analyzed ${data.total_analyzed} IOCs`, 'success');
+                const relationsText = data.includes_relations ? ' with relational data' : '';
+                this.showNotification(`Successfully analyzed ${data.total_analyzed} IOCs${relationsText}`, 'success');
             } else {
                 throw new Error(data.error || 'Analysis failed');
             }
@@ -187,6 +199,7 @@ class IOCAnalyzer {
                     <span class="stat-number">${summary.clean}</span>
                     <span class="stat-label">Clean</span>
                 </div>
+                ${data.includes_relations ? '<div class="stat-item info"><span class="stat-label">Enhanced Analysis</span></div>' : ''}
             </div>
         `;
 
@@ -195,7 +208,7 @@ class IOCAnalyzer {
 
         // Display each result
         data.results.forEach((result, index) => {
-            const resultCard = this.createResultCard(result, index);
+            const resultCard = this.createResultCard(result, index, data.includes_relations);
             resultsGrid.appendChild(resultCard);
         });
 
@@ -203,29 +216,45 @@ class IOCAnalyzer {
         resultsSection.scrollIntoView({ behavior: 'smooth' });
     }
 
-    createResultCard(result, index) {
+    createResultCard(result, index, includesRelations = false) {
         const card = document.createElement('div');
-        card.className = 'result-card';
+        card.className = 'result-card enhanced-card';
         
         const threatLevel = this.calculateThreatLevel(result);
         card.classList.add(`threat-${threatLevel}`);
 
-        let resultsHtml = '';
-        if (result.results && result.results.length > 0) {
-            resultsHtml = result.results.map(apiResult => {
-                if (apiResult.error) {
-                    return `
-                        <div class="api-result error">
-                            <div class="api-source">${apiResult.source}</div>
-                            <div class="api-error">${apiResult.error}</div>
-                        </div>
-                    `;
-                }
+        let mainAnalysisHtml = '';
+        let relationalDataHtml = '';
+        let additionalSourcesHtml = '';
 
-                return this.formatAPIResult(apiResult);
+        // Handle main analysis
+        if (result.main_analysis && !result.main_analysis.error) {
+            mainAnalysisHtml = this.formatMainAnalysis(result.main_analysis);
+        } else if (result.main_analysis && result.main_analysis.error) {
+            mainAnalysisHtml = `<div class="error-message">Main Analysis: ${result.main_analysis.error}</div>`;
+        }
+
+        // Handle relational data (enhanced feature)
+        if (includesRelations && result.relational_data) {
+            relationalDataHtml = this.formatRelationalData(result.relational_data, result.type);
+        }
+
+        // Handle additional sources (like AbuseIPDB)
+        if (result.additional_sources && result.additional_sources.length > 0) {
+            additionalSourcesHtml = result.additional_sources.map(source => {
+                if (source.error) {
+                    return `<div class="api-result error">
+                        <div class="api-source">${source.source}</div>
+                        <div class="api-error">${source.error}</div>
+                    </div>`;
+                }
+                return this.formatAPIResult(source);
             }).join('');
-        } else if (result.error) {
-            resultsHtml = `<div class="error-message">${result.error}</div>`;
+        }
+
+        // Handle errors
+        if (result.error) {
+            mainAnalysisHtml = `<div class="error-message">${result.error}</div>`;
         }
 
         card.innerHTML = `
@@ -233,6 +262,7 @@ class IOCAnalyzer {
                 <div class="result-title">
                     <span class="ioc-type ${result.type}">${result.type?.toUpperCase() || 'UNKNOWN'}</span>
                     <span class="ioc-value">${this.escapeHtml(result.ioc)}</span>
+                    ${result.hash_type ? `<span class="hash-type">(${result.hash_type.toUpperCase()})</span>` : ''}
                 </div>
                 <div class="threat-badge ${threatLevel}">
                     ${this.getThreatIcon(threatLevel)}
@@ -240,7 +270,9 @@ class IOCAnalyzer {
                 </div>
             </div>
             <div class="result-body">
-                ${resultsHtml}
+                ${mainAnalysisHtml}
+                ${additionalSourcesHtml}
+                ${relationalDataHtml}
             </div>
             <div class="result-footer">
                 <small>Analysis #${index + 1} - ${new Date().toLocaleString()}</small>
@@ -250,13 +282,200 @@ class IOCAnalyzer {
         return card;
     }
 
-    escapeHtml(unsafe) {
-        return unsafe
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
+    formatMainAnalysis(analysis) {
+        if (analysis.source === 'VirusTotal') {
+            return `
+                <div class="api-result main-analysis">
+                    <div class="api-source">${analysis.source} - Main Report</div>
+                    <div class="api-stats">
+                        <div class="stat">
+                            <span class="label">Malicious:</span>
+                            <span class="value danger">${analysis.malicious || 0}</span>
+                        </div>
+                        <div class="stat">
+                            <span class="label">Suspicious:</span>
+                            <span class="value warning">${analysis.suspicious || 0}</span>
+                        </div>
+                        <div class="stat">
+                            <span class="label">Clean:</span>
+                            <span class="value success">${analysis.clean || 0}</span>
+                        </div>
+                        <div class="stat">
+                            <span class="label">Total Scans:</span>
+                            <span class="value">${analysis.total_scans || 0}</span>
+                        </div>
+                        ${analysis.reputation !== undefined ? `
+                        <div class="stat">
+                            <span class="label">Reputation:</span>
+                            <span class="value ${analysis.reputation < 0 ? 'danger' : 'success'}">${analysis.reputation}</span>
+                        </div>` : ''}
+                    </div>
+                    ${this.formatExtraInfo(analysis)}
+                </div>
+            `;
+        }
+        return '<div class="api-info">Analysis data available</div>';
+    }
+
+    formatExtraInfo(analysis) {
+        let extraInfo = '';
+        const fields = {
+            'Country': analysis.country,
+            'Registrar': analysis.registrar,
+            'File Type': analysis.file_type,
+            'File Size': analysis.file_size ? `${analysis.file_size} bytes` : null,
+            'AS Owner': analysis.as_owner,
+            'Network': analysis.network,
+            'Creation Date': analysis.creation_date,
+            'First Submission': analysis.first_submission,
+            'MD5': analysis.md5,
+            'SHA1': analysis.sha1,
+            'SHA256': analysis.sha256
+        };
+
+        Object.entries(fields).forEach(([label, value]) => {
+            if (value && value !== 'Unknown') {
+                extraInfo += `<div class="extra-info">${label}: ${value}</div>`;
+            }
+        });
+
+        return extraInfo;
+    }
+
+    formatRelationalData(relationalData, iocType) {
+        let html = '<div class="relational-section"><h4>Relational Intelligence</h4>';
+
+        // Format based on IOC type
+        switch (iocType) {
+            case 'ip':
+                html += this.formatIPRelations(relationalData);
+                break;
+            case 'domain':
+                html += this.formatDomainRelations(relationalData);
+                break;
+            case 'hash':
+                html += this.formatHashRelations(relationalData);
+                break;
+        }
+
+        html += '</div>';
+        return html;
+    }
+
+    formatIPRelations(data) {
+        let html = '';
+        
+        if (data.associated_domains && data.associated_domains.length > 0) {
+            html += `
+                <div class="relation-group">
+                    <h5>Associated Domains (${data.associated_domains.length})</h5>
+                    <div class="relation-items">
+                        ${data.associated_domains.slice(0, 5).map(domain => `
+                            <div class="relation-item">
+                                <span class="relation-value">${domain.domain}</span>
+                                <span class="relation-date">Last: ${new Date(domain.last_resolved * 1000).toLocaleDateString()}</span>
+                            </div>
+                        `).join('')}
+                        ${data.associated_domains.length > 5 ? `<div class="relation-more">+${data.associated_domains.length - 5} more</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        if (data.communicating_files && data.communicating_files.length > 0) {
+            html += `
+                <div class="relation-group">
+                    <h5>Communicating Files (${data.communicating_files.length})</h5>
+                    <div class="relation-items">
+                        ${data.communicating_files.slice(0, 3).map(file => `
+                            <div class="relation-item">
+                                <span class="relation-value">${file.sha256}</span>
+                                <span class="relation-threat ${file.detections > 0 ? 'danger' : 'success'}">${file.detections}/${file.total_engines}</span>
+                            </div>
+                        `).join('')}
+                        ${data.communicating_files.length > 3 ? `<div class="relation-more">+${data.communicating_files.length - 3} more</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        return html;
+    }
+
+    formatDomainRelations(data) {
+        let html = '';
+        
+        if (data.associated_ips && data.associated_ips.length > 0) {
+            html += `
+                <div class="relation-group">
+                    <h5>Associated IPs (${data.associated_ips.length})</h5>
+                    <div class="relation-items">
+                        ${data.associated_ips.slice(0, 5).map(ip => `
+                            <div class="relation-item">
+                                <span class="relation-value">${ip.ip}</span>
+                                <span class="relation-date">Last: ${new Date(ip.last_resolved * 1000).toLocaleDateString()}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        if (data.subdomains && data.subdomains.length > 0) {
+            html += `
+                <div class="relation-group">
+                    <h5>Subdomains (${data.subdomains.length})</h5>
+                    <div class="relation-items">
+                        ${data.subdomains.slice(0, 5).map(subdomain => `
+                            <div class="relation-item">
+                                <span class="relation-value">${subdomain.subdomain}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        return html;
+    }
+
+    formatHashRelations(data) {
+        let html = '';
+        
+        if (data.contacted_ips && data.contacted_ips.length > 0) {
+            html += `
+                <div class="relation-group">
+                    <h5>Contacted IPs (${data.contacted_ips.length})</h5>
+                    <div class="relation-items">
+                        ${data.contacted_ips.slice(0, 5).map(ip => `
+                            <div class="relation-item">
+                                <span class="relation-value">${ip.ip}</span>
+                                <span class="relation-country">${ip.country}</span>
+                                <span class="relation-threat ${ip.detections > 0 ? 'danger' : 'success'}">${ip.detections} detections</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        if (data.contacted_domains && data.contacted_domains.length > 0) {
+            html += `
+                <div class="relation-group">
+                    <h5>Contacted Domains (${data.contacted_domains.length})</h5>
+                    <div class="relation-items">
+                        ${data.contacted_domains.slice(0, 5).map(domain => `
+                            <div class="relation-item">
+                                <span class="relation-value">${domain.domain}</span>
+                                <span class="relation-threat ${domain.detections > 0 ? 'danger' : 'success'}">${domain.detections} detections</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        return html;
     }
 
     formatAPIResult(apiResult) {
@@ -264,6 +483,7 @@ class IOCAnalyzer {
         
         switch (apiResult.source) {
             case 'VirusTotal':
+                // This case is handled by formatMainAnalysis now
                 content = `
                     <div class="api-stats">
                         <div class="stat">
@@ -278,14 +498,7 @@ class IOCAnalyzer {
                             <span class="label">Clean:</span>
                             <span class="value success">${apiResult.clean || 0}</span>
                         </div>
-                        <div class="stat">
-                            <span class="label">Total Scans:</span>
-                            <span class="value">${apiResult.total_scans || 0}</span>
-                        </div>
                     </div>
-                    ${apiResult.country ? `<div class="extra-info">Country: ${apiResult.country}</div>` : ''}
-                    ${apiResult.registrar ? `<div class="extra-info">Registrar: ${apiResult.registrar}</div>` : ''}
-                    ${apiResult.file_type ? `<div class="extra-info">File Type: ${apiResult.file_type}</div>` : ''}
                 `;
                 break;
                 
@@ -329,12 +542,20 @@ class IOCAnalyzer {
         let suspiciousCount = 0;
         let totalChecks = 0;
 
-        if (result.results) {
-            result.results.forEach(apiResult => {
-                if (!apiResult.error) {
-                    if (apiResult.malicious) maliciousCount += apiResult.malicious;
-                    if (apiResult.suspicious) suspiciousCount += apiResult.suspicious;
-                    if (apiResult.abuse_confidence && apiResult.abuse_confidence > 75) maliciousCount += 1;
+        // Check main analysis
+        if (result.main_analysis && !result.main_analysis.error) {
+            if (result.main_analysis.malicious) maliciousCount += result.main_analysis.malicious;
+            if (result.main_analysis.suspicious) suspiciousCount += result.main_analysis.suspicious;
+            totalChecks++;
+        }
+
+        // Check additional sources
+        if (result.additional_sources) {
+            result.additional_sources.forEach(source => {
+                if (!source.error) {
+                    if (source.malicious) maliciousCount += source.malicious;
+                    if (source.suspicious) suspiciousCount += source.suspicious;
+                    if (source.abuse_confidence && source.abuse_confidence > 75) maliciousCount += 1;
                     totalChecks++;
                 }
             });
@@ -371,6 +592,7 @@ class IOCAnalyzer {
         return { malicious, suspicious, clean };
     }
 
+    // Keep all the existing validation methods unchanged
     validateSingleInput(input) {
         const value = input.value.trim();
         if (!value) return;
@@ -599,18 +821,35 @@ class IOCAnalyzer {
     }
 
     convertToCSV(results) {
-        const headers = ['IOC', 'Type', 'Threat Level', 'Sources', 'Summary'];
+        const headers = ['IOC', 'Type', 'Threat Level', 'Main Source', 'Malicious', 'Suspicious', 'Clean', 'Additional Sources', 'Relations Count'];
         const rows = results.map(result => {
             const threatLevel = this.calculateThreatLevel(result);
-            const sources = result.results ? result.results.map(r => r.source).join(';') : '';
-            const summary = result.error || 'Analysis completed';
+            const mainSource = result.main_analysis ? result.main_analysis.source || 'Unknown' : 'N/A';
+            const malicious = result.main_analysis ? result.main_analysis.malicious || 0 : 0;
+            const suspicious = result.main_analysis ? result.main_analysis.suspicious || 0 : 0;
+            const clean = result.main_analysis ? result.main_analysis.clean || 0 : 0;
+            const additionalSources = result.additional_sources ? result.additional_sources.map(s => s.source).join(';') : '';
+            
+            // Count relational data
+            let relationsCount = 0;
+            if (result.relational_data) {
+                Object.values(result.relational_data).forEach(relations => {
+                    if (Array.isArray(relations)) {
+                        relationsCount += relations.length;
+                    }
+                });
+            }
             
             return [
                 `"${result.ioc}"`,
                 result.type || 'unknown',
                 threatLevel,
-                `"${sources}"`,
-                `"${summary}"`
+                mainSource,
+                malicious,
+                suspicious,
+                clean,
+                `"${additionalSources}"`,
+                relationsCount
             ].join(',');
         });
 
@@ -654,25 +893,21 @@ class IOCAnalyzer {
         const config = {
             virustotal: this.getInputValue('vtApiKey'),
             abuseipdb: this.getInputValue('abuseApiKey'),
-            otx: this.getInputValue('otxApiKey')
+            otx: this.getInputValue('otxApiKey'),
+            includeRelations: this.includeRelations
         };
 
-        // Store configuration locally
-        localStorage.setItem('ioc-analyzer-config', JSON.stringify(config));
-        this.showNotification('Configuration saved locally', 'success');
+        // Note: Cannot use localStorage in Claude artifacts, would use in-memory storage
+        // In a real deployment, you'd save to localStorage or send to backend
+        this.showNotification('Configuration saved (session only)', 'info');
     }
 
     loadSavedConfig() {
+        // Note: In Claude artifacts, we can't use localStorage
+        // In a real deployment, this would load from localStorage
         try {
-            const config = JSON.parse(localStorage.getItem('ioc-analyzer-config') || '{}');
-            
-            const vtKey = document.getElementById('vtApiKey');
-            const abuseKey = document.getElementById('abuseApiKey');
-            const otxKey = document.getElementById('otxApiKey');
-            
-            if (config.virustotal && vtKey) vtKey.value = config.virustotal;
-            if (config.abuseipdb && abuseKey) abuseKey.value = config.abuseipdb;
-            if (config.otx && otxKey) otxKey.value = config.otx;
+            // Placeholder for loading saved configuration
+            console.log('Config loading would happen here in real deployment');
         } catch (error) {
             console.error('Failed to load saved configuration:', error);
         }
@@ -718,6 +953,15 @@ class IOCAnalyzer {
         setTimeout(() => {
             notification.classList.add('show');
         }, 100);
+    }
+
+    escapeHtml(unsafe) {
+        return unsafe
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 }
 

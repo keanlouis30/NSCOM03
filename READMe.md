@@ -395,3 +395,9 @@ window.iocAnalyzer.analyzeIOCs();
 - Bulk analysis (10 IOCs): < 30 seconds
 - Page load time: < 2 seconds
 - Export file generation: < 1 second
+
+
+analysis should have connection of the ioc
+get the other domains
+network traffic
+network connections
