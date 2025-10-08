@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 import re
 import ipaddress
@@ -8,16 +8,43 @@ import time
 from urllib.parse import urlparse
 import os
 from typing import Dict, List, Any, Optional
+from datetime import datetime
+from io import BytesIO
+
+# Import deep analysis modules
+from deep_analysis import DeepNetworkAnalyzer
+from report_generator import DeepAnalysisReportGenerator
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for cross-origin requests
 
 # API Configuration - Set these as environment variables
+# Support multiple API keys for rate limit management
 API_KEYS = {
-    'virustotal': os.getenv('VIRUSTOTAL_API_KEY', 'c2a46af380ec8e4900d701e3553f0d36c0689fd93642d22f519966716379cf08'),
-    'abuseipdb': os.getenv('ABUSEIPDB_API_KEY', 'be21307947901961f6b756e90b39937095b635043da7282b3710e09a859f0569bf74e6341137083c'),
-    'otx': os.getenv('OTX_API_KEY', '9388e180c71b17aac2a3390e8847b7689cce6ed12378e7ce8ecce4c86e89522a')
+    'virustotal': [
+        os.getenv('VIRUSTOTAL_API_KEY', 'c2a46af380ec8e4900d701e3553f0d36c0689fd93642d22f519966716379cf08'),
+        os.getenv('VIRUSTOTAL_API_KEY_2', ''),
+        os.getenv('VIRUSTOTAL_API_KEY_3', '')
+    ],
+    'abuseipdb': [
+        os.getenv('ABUSEIPDB_API_KEY', 'be21307947901961f6b756e90b39937095b635043da7282b3710e09a859f0569bf74e6341137083c'),
+        os.getenv('ABUSEIPDB_API_KEY_2', '')
+    ],
+    'otx': [
+        os.getenv('OTX_API_KEY', '9388e180c71b17aac2a3390e8847b7689cce6ed12378e7ce8ecce4c86e89522a'),
+        os.getenv('OTX_API_KEY_2', '')
+    ]
 }
+
+# Filter out empty keys and flatten to simple dict for backward compatibility
+# while keeping track of multiple keys internally
+API_KEYS_FILTERED = {
+    service: [key for key in keys if key and not key.startswith('your_')] 
+    for service, keys in API_KEYS.items()
+}
+
+# Simple API key rotation counter
+API_KEY_ROTATION = {service: 0 for service in API_KEYS.keys()}
 
 class IOCClassifier:
     """Classify different types of IOCs using regex patterns"""
@@ -108,11 +135,26 @@ class EnhancedThreatIntelligenceAPI:
         self.session = requests.Session()
         self.session.headers.update({'User-Agent': 'ThreatIntel-Analyzer/2.0'})
     
+    def _get_api_key(self, service: str) -> str:
+        """Get API key with rotation for rate limit management"""
+        keys = API_KEYS_FILTERED.get(service, [])
+        if not keys:
+            return ''
+        
+        # Rotate through available keys
+        key_index = API_KEY_ROTATION[service] % len(keys)
+        API_KEY_ROTATION[service] = (API_KEY_ROTATION[service] + 1) % len(keys)
+        
+        return keys[key_index]
+    
     def _make_vt_request(self, endpoint: str, params: Dict = None) -> Dict[str, Any]:
         """Helper method to make VirusTotal API requests with error handling"""
         try:
             url = f"https://www.virustotal.com/api/v3/{endpoint}"
-            headers = {'x-apikey': API_KEYS['virustotal']}
+            api_key = self._get_api_key('virustotal')
+            if not api_key:
+                return {'error': 'No VirusTotal API key available'}
+            headers = {'x-apikey': api_key}
             
             response = self.session.get(url, headers=headers, params=params, timeout=15)
             if response.status_code == 200:
@@ -155,8 +197,8 @@ class EnhancedThreatIntelligenceAPI:
         if not include_relations:
             return result
         
-        # Associated domains (resolutions)
-        domains_data = self._make_vt_request(f"ip_addresses/{ip}/resolutions", {'limit': 20})
+        # Associated domains (resolutions) - fetch all available
+        domains_data = self._make_vt_request(f"ip_addresses/{ip}/resolutions", {'limit': 100})
         if 'error' not in domains_data:
             for item in domains_data.get('data', []):
                 attrs = item.get('attributes', {})
@@ -166,8 +208,8 @@ class EnhancedThreatIntelligenceAPI:
                     'resolver': attrs.get('resolver', 'Unknown')
                 })
         
-        # Communicating files (malware traffic)
-        files_data = self._make_vt_request(f"ip_addresses/{ip}/communicating_files", {'limit': 15})
+        # Communicating files (malware traffic) - fetch all available
+        files_data = self._make_vt_request(f"ip_addresses/{ip}/communicating_files", {'limit': 100})
         if 'error' not in files_data:
             for item in files_data.get('data', []):
                 attrs = item.get('attributes', {})
@@ -181,8 +223,8 @@ class EnhancedThreatIntelligenceAPI:
                     'size': attrs.get('size', 0)
                 })
         
-        # Downloaded files
-        download_data = self._make_vt_request(f"ip_addresses/{ip}/downloaded_files", {'limit': 10})
+        # Downloaded files - fetch all available
+        download_data = self._make_vt_request(f"ip_addresses/{ip}/downloaded_files", {'limit': 100})
         if 'error' not in download_data:
             for item in download_data.get('data', []):
                 attrs = item.get('attributes', {})
@@ -229,8 +271,8 @@ class EnhancedThreatIntelligenceAPI:
         if not include_relations:
             return result
         
-        # Associated IPs (resolutions)
-        ips_data = self._make_vt_request(f"domains/{domain}/resolutions", {'limit': 20})
+        # Associated IPs (resolutions) - fetch all available
+        ips_data = self._make_vt_request(f"domains/{domain}/resolutions", {'limit': 100})
         if 'error' not in ips_data:
             for item in ips_data.get('data', []):
                 attrs = item.get('attributes', {})
@@ -240,8 +282,8 @@ class EnhancedThreatIntelligenceAPI:
                     'resolver': attrs.get('resolver', 'Unknown')
                 })
         
-        # Subdomains
-        subdomains_data = self._make_vt_request(f"domains/{domain}/subdomains", {'limit': 15})
+        # Subdomains - fetch all available
+        subdomains_data = self._make_vt_request(f"domains/{domain}/subdomains", {'limit': 100})
         if 'error' not in subdomains_data:
             for item in subdomains_data.get('data', []):
                 result['subdomains'].append({
@@ -249,8 +291,8 @@ class EnhancedThreatIntelligenceAPI:
                     'last_seen': item.get('attributes', {}).get('last_modification_date', 'Unknown')
                 })
         
-        # Communicating files
-        files_data = self._make_vt_request(f"domains/{domain}/communicating_files", {'limit': 15})
+        # Communicating files - fetch all available
+        files_data = self._make_vt_request(f"domains/{domain}/communicating_files", {'limit': 100})
         if 'error' not in files_data:
             for item in files_data.get('data', []):
                 attrs = item.get('attributes', {})
@@ -263,8 +305,8 @@ class EnhancedThreatIntelligenceAPI:
                     'file_type': attrs.get('type_description', 'Unknown')
                 })
         
-        # Associated URLs
-        urls_data = self._make_vt_request(f"domains/{domain}/urls", {'limit': 10})
+        # Associated URLs - fetch all available
+        urls_data = self._make_vt_request(f"domains/{domain}/urls", {'limit': 100})
         if 'error' not in urls_data:
             for item in urls_data.get('data', []):
                 attrs = item.get('attributes', {})
@@ -311,8 +353,8 @@ class EnhancedThreatIntelligenceAPI:
         if not include_relations:
             return result
         
-        # Contacted IPs
-        ips_data = self._make_vt_request(f"files/{file_hash}/contacted_ips", {'limit': 20})
+        # Contacted IPs - fetch all available
+        ips_data = self._make_vt_request(f"files/{file_hash}/contacted_ips", {'limit': 100})
         if 'error' not in ips_data:
             for item in ips_data.get('data', []):
                 attrs = item.get('attributes', {})
@@ -325,8 +367,8 @@ class EnhancedThreatIntelligenceAPI:
                     'reputation': attrs.get('reputation', 0)
                 })
         
-        # Contacted domains
-        domains_data = self._make_vt_request(f"files/{file_hash}/contacted_domains", {'limit': 20})
+        # Contacted domains - fetch all available
+        domains_data = self._make_vt_request(f"files/{file_hash}/contacted_domains", {'limit': 100})
         if 'error' not in domains_data:
             for item in domains_data.get('data', []):
                 attrs = item.get('attributes', {})
@@ -338,8 +380,8 @@ class EnhancedThreatIntelligenceAPI:
                     'registrar': attrs.get('registrar', 'Unknown')
                 })
         
-        # Contacted URLs
-        urls_data = self._make_vt_request(f"files/{file_hash}/contacted_urls", {'limit': 15})
+        # Contacted URLs - fetch all available
+        urls_data = self._make_vt_request(f"files/{file_hash}/contacted_urls", {'limit': 100})
         if 'error' not in urls_data:
             for item in urls_data.get('data', []):
                 attrs = item.get('attributes', {})
@@ -357,8 +399,11 @@ class EnhancedThreatIntelligenceAPI:
         """Query AbuseIPDB for IP reputation"""
         try:
             url = 'https://api.abuseipdb.com/api/v2/check'
+            api_key = self._get_api_key('abuseipdb')
+            if not api_key:
+                return {'source': 'AbuseIPDB', 'error': 'No AbuseIPDB API key available'}
             headers = {
-                'Key': API_KEYS['abuseipdb'],
+                'Key': api_key,
                 'Accept': 'application/json'
             }
             params = {
@@ -506,6 +551,13 @@ class EnhancedIOCAnalyzer:
 # Initialize the enhanced analyzer
 analyzer = EnhancedIOCAnalyzer()
 
+# Initialize deep analysis components
+deep_analyzer = DeepNetworkAnalyzer()
+report_generator = DeepAnalysisReportGenerator()
+
+# Store latest deep analysis results in memory (for download)
+latest_deep_results = []
+
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
@@ -623,6 +675,151 @@ def classify_ioc():
     except Exception as e:
         return jsonify({'error': f'Classification failed: {str(e)}'}), 500
 
+@app.route('/analyze/deep', methods=['POST'])
+def analyze_deep():
+    """Deep analysis endpoint with comprehensive network intelligence"""
+    global latest_deep_results
+    
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Collect all IOCs
+        iocs_to_analyze = []
+        
+        if data.get('ip_address'):
+            iocs_to_analyze.append(data['ip_address'].strip())
+        
+        if data.get('domain_name'):
+            iocs_to_analyze.append(data['domain_name'].strip())
+        
+        if data.get('file_hash'):
+            iocs_to_analyze.append(data['file_hash'].strip())
+        
+        if data.get('url'):
+            iocs_to_analyze.append(data['url'].strip())
+        
+        if data.get('bulk_ioc'):
+            bulk_iocs = [ioc.strip() for ioc in data['bulk_ioc'].split('\n') if ioc.strip()]
+            iocs_to_analyze.extend(bulk_iocs)
+        
+        if not iocs_to_analyze:
+            return jsonify({'error': 'No IOCs provided for analysis'}), 400
+        
+        # Remove duplicates
+        unique_iocs = list(dict.fromkeys(iocs_to_analyze))
+        
+        # Perform deep analysis on each IOC
+        results = []
+        for ioc in unique_iocs:
+            try:
+                # First classify the IOC
+                ioc_type = IOCClassifier.classify_ioc(ioc)
+                
+                # Perform standard analysis
+                standard_result = analyzer.analyze_ioc(ioc, include_relations=True)
+                
+                # Perform deep analysis based on type
+                deep_result = {}
+                if ioc_type == 'ip':
+                    deep_result = deep_analyzer.analyze_ip_deep(ioc)
+                elif ioc_type == 'domain':
+                    deep_result = deep_analyzer.analyze_domain_deep(ioc)
+                elif ioc_type == 'url':
+                    # Extract domain from URL and analyze
+                    from urllib.parse import urlparse
+                    parsed = urlparse(ioc)
+                    domain = parsed.netloc
+                    deep_result = deep_analyzer.analyze_domain_deep(domain)
+                
+                # Combine results
+                combined = {
+                    'ioc': ioc,
+                    'type': ioc_type,
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'standard_analysis': standard_result,
+                    'deep_analysis': deep_result
+                }
+                
+                results.append(combined)
+                
+                # Add delay to avoid rate limiting
+                time.sleep(1)
+                
+            except Exception as e:
+                results.append({
+                    'ioc': ioc,
+                    'type': 'error',
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'error': f'Deep analysis failed: {str(e)}'
+                })
+        
+        # Store results for download
+        latest_deep_results = results
+        
+        return jsonify({
+            'success': True,
+            'total_analyzed': len(results),
+            'analysis_type': 'deep',
+            'results': results
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Server error: {str(e)}'
+        }), 500
+
+@app.route('/download-report/<format_type>', methods=['GET'])
+def download_report(format_type: str):
+    """Download deep analysis report in specified format"""
+    global latest_deep_results
+    
+    if not latest_deep_results:
+        return jsonify({'error': 'No analysis results available. Run a deep analysis first.'}), 400
+    
+    try:
+        if format_type == 'json':
+            report_content = report_generator.generate_json_report(latest_deep_results)
+            filename = report_generator.get_filename('json')
+            
+            return send_file(
+                BytesIO(report_content.encode()),
+                mimetype='application/json',
+                as_attachment=True,
+                download_name=filename
+            )
+        
+        elif format_type == 'csv':
+            report_content = report_generator.generate_csv_report(latest_deep_results)
+            filename = report_generator.get_filename('csv')
+            
+            return send_file(
+                BytesIO(report_content.encode()),
+                mimetype='text/csv',
+                as_attachment=True,
+                download_name=filename
+            )
+        
+        elif format_type == 'pdf':
+            report_content = report_generator.generate_pdf_report(latest_deep_results)
+            filename = report_generator.get_filename('pdf')
+            
+            return send_file(
+                BytesIO(report_content),
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name=filename
+            )
+        
+        else:
+            return jsonify({'error': 'Invalid format type. Use json, csv, or pdf.'}), 400
+    
+    except Exception as e:
+        return jsonify({'error': f'Report generation failed: {str(e)}'}), 500
+
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({'error': 'Endpoint not found'}), 404
@@ -633,7 +830,11 @@ def internal_error(error):
 
 if __name__ == '__main__':
     # Check if API keys are configured
-    missing_keys = [key for key, value in API_KEYS.items() if value.startswith('your_')]
+    missing_keys = []
+    for service, keys in API_KEYS_FILTERED.items():
+        if not keys:  # No valid keys for this service
+            missing_keys.append(service)
+    
     if missing_keys:
         print("⚠️  Warning: The following API keys are not configured:")
         for key in missing_keys:
@@ -641,15 +842,26 @@ if __name__ == '__main__':
         print("Set them as environment variables for full functionality.")
         print()
     
+    # Show available API key counts
+    print("🔑 API Key Status:")
+    for service, keys in API_KEYS_FILTERED.items():
+        count = len(keys)
+        if count > 0:
+            print(f"   - {service.upper()}: {count} key(s) configured")
+        else:
+            print(f"   - {service.upper()}: No keys configured")
+    print()
+    
     print("🔍 Enhanced Threat Intelligence IOC Analyzer Starting...")
-    print("🚀 New Features:")
-    print("   - Relational IOC Analysis")
-    print("   - Associated Domains/IPs Discovery")
-    print("   - Malware Communication Patterns")
-    print("   - Network Behavior Analysis")
+    print("🚀 Features:")
+    print("   - Standard: Relational IOC Analysis with Threat Intelligence")
+    print("   - Deep: Comprehensive Network Intelligence & Relationships")
+    print("   - Reports: JSON, CSV, PDF export with complete data")
     print()
     print("📡 Available endpoints:")
-    print("   - POST /analyze - Enhanced IOC analysis with relations")
+    print("   - POST /analyze - Standard IOC analysis with relations")
+    print("   - POST /analyze/deep - Deep analysis with network intelligence")
+    print("   - GET /download-report/<format> - Download report (json/csv/pdf)")
     print("   - GET /analyze/<type>/<ioc> - Quick single IOC analysis")
     print("   - POST /classify - Classify IOC type")
     print("   - GET /health - Health check")

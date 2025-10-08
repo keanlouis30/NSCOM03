@@ -24,6 +24,14 @@ class IOCAnalyzer {
         document.getElementById('exportJson').addEventListener('click', () => this.exportResults('json'));
         document.getElementById('exportCsv').addEventListener('click', () => this.exportResults('csv'));
 
+        // Deep analysis download buttons
+        const downloadJson = document.getElementById('downloadJson');
+        const downloadCsv = document.getElementById('downloadCsv');
+        const downloadPdf = document.getElementById('downloadPdf');
+        if (downloadJson) downloadJson.addEventListener('click', () => this.downloadDeepReport('json'));
+        if (downloadCsv) downloadCsv.addEventListener('click', () => this.downloadDeepReport('csv'));
+        if (downloadPdf) downloadPdf.addEventListener('click', () => this.downloadDeepReport('pdf'));
+
         // Configuration
         document.getElementById('toggleConfig').addEventListener('click', () => this.toggleConfig());
         document.getElementById('saveConfig').addEventListener('click', () => this.saveConfig());
@@ -33,6 +41,18 @@ class IOCAnalyzer {
         if (relationsToggle) {
             relationsToggle.addEventListener('change', (e) => {
                 this.includeRelations = e.target.checked;
+            });
+        }
+        
+        // Deep analysis toggle
+        const deepAnalysisToggle = document.getElementById('enableDeepAnalysis');
+        if (deepAnalysisToggle) {
+            this.enableDeepAnalysis = false;
+            deepAnalysisToggle.addEventListener('change', (e) => {
+                this.enableDeepAnalysis = e.target.checked;
+                if (e.target.checked) {
+                    this.showNotification('Deep Analysis enabled! This will take longer but provide comprehensive network intelligence.', 'info');
+                }
             });
         }
 
@@ -135,37 +155,119 @@ class IOCAnalyzer {
         }
 
         this.isAnalyzing = true;
-        this.showLoadingModal();
-        this.updateStatus('Analyzing...', 'loading');
-
-        try {
-            const response = await fetch(`${this.baseUrl}/analyze`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(iocs)
-            });
-
-            const data = await response.json();
+        
+        // Check if deep analysis is enabled
+        if (this.enableDeepAnalysis) {
+            this.updateModalMessage('Deep Analysis Mode', 'Performing comprehensive network intelligence analysis. This may take several minutes...');
+            this.showLoadingModal();
+            this.updateStatus('Deep Analysis...', 'loading');
             
-            if (response.ok && data.success) {
-                this.results = data.results;
-                this.displayResults(data);
-                this.updateStatus('Analysis Complete', 'success');
-                const relationsText = data.includes_relations ? ' with relational data' : '';
-                this.showNotification(`Successfully analyzed ${data.total_analyzed} IOCs${relationsText}`, 'success');
-            } else {
-                throw new Error(data.error || 'Analysis failed');
-            }
+            try {
+                const response = await fetch(`${this.baseUrl}/analyze/deep`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(iocs)
+                });
 
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    this.results = data.results;
+                    this.displayResults(data);
+                    this.updateStatus('Deep Analysis Complete', 'success');
+                    this.showNotification(`Deep analysis completed for ${data.total_analyzed} IOCs. Reports available for download!`, 'success');
+                    
+                    // Show deep export options
+                    document.getElementById('deepExportOptions').style.display = 'block';
+                } else {
+                    throw new Error(data.error || 'Deep analysis failed');
+                }
+            } catch (error) {
+                console.error('Deep analysis error:', error);
+                this.showNotification(`Deep analysis failed: ${error.message}`, 'error');
+                this.updateStatus('Analysis Failed', 'error');
+            } finally {
+                this.hideLoadingModal();
+                this.isAnalyzing = false;
+            }
+        } else {
+            // Standard analysis
+            this.updateModalMessage('Analyzing IOCs...', 'Please wait while we check your indicators against threat intelligence databases.');
+            this.showLoadingModal();
+            this.updateStatus('Analyzing...', 'loading');
+
+            try {
+                const response = await fetch(`${this.baseUrl}/analyze`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(iocs)
+                });
+
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    this.results = data.results;
+                    this.displayResults(data);
+                    this.updateStatus('Analysis Complete', 'success');
+                    const relationsText = data.includes_relations ? ' with relational data' : '';
+                    this.showNotification(`Successfully analyzed ${data.total_analyzed} IOCs${relationsText}`, 'success');
+                    
+                    // Hide deep export options
+                    document.getElementById('deepExportOptions').style.display = 'none';
+                } else {
+                    throw new Error(data.error || 'Analysis failed');
+                }
+
+            } catch (error) {
+                console.error('Analysis error:', error);
+                this.showNotification(`Analysis failed: ${error.message}`, 'error');
+                this.updateStatus('Analysis Failed', 'error');
+            } finally {
+                this.hideLoadingModal();
+                this.isAnalyzing = false;
+            }
+        }
+    }
+    
+    updateModalMessage(title, message) {
+        const modalTitle = document.getElementById('modalTitle');
+        const modalMessage = document.getElementById('modalMessage');
+        if (modalTitle) modalTitle.textContent = title;
+        if (modalMessage) modalMessage.textContent = message;
+    }
+    
+    async downloadDeepReport(format) {
+        try {
+            this.showNotification(`Generating ${format.toUpperCase()} report...`, 'info');
+            
+            const response = await fetch(`${this.baseUrl}/download-report/${format}`, {
+                method: 'GET'
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Download failed');
+            }
+            
+            // Create download link
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `deep_analysis_report_${new Date().toISOString().split('T')[0]}.${format}`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            this.showNotification(`${format.toUpperCase()} report downloaded successfully!`, 'success');
         } catch (error) {
-            console.error('Analysis error:', error);
-            this.showNotification(`Analysis failed: ${error.message}`, 'error');
-            this.updateStatus('Analysis Failed', 'error');
-        } finally {
-            this.hideLoadingModal();
-            this.isAnalyzing = false;
+            console.error('Download error:', error);
+            this.showNotification(`Download failed: ${error.message}`, 'error');
         }
     }
 
@@ -370,13 +472,12 @@ class IOCAnalyzer {
                 <div class="relation-group">
                     <h5>Associated Domains (${data.associated_domains.length})</h5>
                     <div class="relation-items">
-                        ${data.associated_domains.slice(0, 5).map(domain => `
+                        ${data.associated_domains.map(domain => `
                             <div class="relation-item">
                                 <span class="relation-value">${domain.domain}</span>
                                 <span class="relation-date">Last: ${new Date(domain.last_resolved * 1000).toLocaleDateString()}</span>
                             </div>
                         `).join('')}
-                        ${data.associated_domains.length > 5 ? `<div class="relation-more">+${data.associated_domains.length - 5} more</div>` : ''}
                     </div>
                 </div>
             `;
@@ -387,13 +488,12 @@ class IOCAnalyzer {
                 <div class="relation-group">
                     <h5>Communicating Files (${data.communicating_files.length})</h5>
                     <div class="relation-items">
-                        ${data.communicating_files.slice(0, 3).map(file => `
+                        ${data.communicating_files.map(file => `
                             <div class="relation-item">
                                 <span class="relation-value">${file.sha256}</span>
                                 <span class="relation-threat ${file.detections > 0 ? 'danger' : 'success'}">${file.detections}/${file.total_engines}</span>
                             </div>
                         `).join('')}
-                        ${data.communicating_files.length > 3 ? `<div class="relation-more">+${data.communicating_files.length - 3} more</div>` : ''}
                     </div>
                 </div>
             `;
@@ -410,7 +510,7 @@ class IOCAnalyzer {
                 <div class="relation-group">
                     <h5>Associated IPs (${data.associated_ips.length})</h5>
                     <div class="relation-items">
-                        ${data.associated_ips.slice(0, 5).map(ip => `
+                        ${data.associated_ips.map(ip => `
                             <div class="relation-item">
                                 <span class="relation-value">${ip.ip}</span>
                                 <span class="relation-date">Last: ${new Date(ip.last_resolved * 1000).toLocaleDateString()}</span>
@@ -426,7 +526,7 @@ class IOCAnalyzer {
                 <div class="relation-group">
                     <h5>Subdomains (${data.subdomains.length})</h5>
                     <div class="relation-items">
-                        ${data.subdomains.slice(0, 5).map(subdomain => `
+                        ${data.subdomains.map(subdomain => `
                             <div class="relation-item">
                                 <span class="relation-value">${subdomain.subdomain}</span>
                             </div>
@@ -447,7 +547,7 @@ class IOCAnalyzer {
                 <div class="relation-group">
                     <h5>Contacted IPs (${data.contacted_ips.length})</h5>
                     <div class="relation-items">
-                        ${data.contacted_ips.slice(0, 5).map(ip => `
+                        ${data.contacted_ips.map(ip => `
                             <div class="relation-item">
                                 <span class="relation-value">${ip.ip}</span>
                                 <span class="relation-country">${ip.country}</span>
@@ -464,7 +564,7 @@ class IOCAnalyzer {
                 <div class="relation-group">
                     <h5>Contacted Domains (${data.contacted_domains.length})</h5>
                     <div class="relation-items">
-                        ${data.contacted_domains.slice(0, 5).map(domain => `
+                        ${data.contacted_domains.map(domain => `
                             <div class="relation-item">
                                 <span class="relation-value">${domain.domain}</span>
                                 <span class="relation-threat ${domain.detections > 0 ? 'danger' : 'success'}">${domain.detections} detections</span>
@@ -821,7 +921,14 @@ class IOCAnalyzer {
     }
 
     convertToCSV(results) {
-        const headers = ['IOC', 'Type', 'Threat Level', 'Main Source', 'Malicious', 'Suspicious', 'Clean', 'Additional Sources', 'Relations Count'];
+        const headers = [
+            'IOC', 'Type', 'Threat Level', 'Main Source', 'Malicious', 'Suspicious', 'Clean', 
+            'Country', 'AS Owner', 'Network', 'Reputation', 'Additional Sources',
+            'Associated Domains', 'Associated IPs', 'Subdomains', 'Communicating Files',
+            'Contacted IPs', 'Contacted Domains', 'Contacted URLs', 'Downloaded Files',
+            'Associated URLs', 'Total Relations'
+        ];
+        
         const rows = results.map(result => {
             const threatLevel = this.calculateThreatLevel(result);
             const mainSource = result.main_analysis ? result.main_analysis.source || 'Unknown' : 'N/A';
@@ -830,14 +937,78 @@ class IOCAnalyzer {
             const clean = result.main_analysis ? result.main_analysis.clean || 0 : 0;
             const additionalSources = result.additional_sources ? result.additional_sources.map(s => s.source).join(';') : '';
             
-            // Count relational data
-            let relationsCount = 0;
+            // Extract main analysis details
+            const country = result.main_analysis ? result.main_analysis.country || '' : '';
+            const asOwner = result.main_analysis ? result.main_analysis.as_owner || '' : '';
+            const network = result.main_analysis ? result.main_analysis.network || '' : '';
+            const reputation = result.main_analysis ? result.main_analysis.reputation || '' : '';
+            
+            // Extract relational data
+            let associatedDomains = '';
+            let associatedIPs = '';
+            let subdomains = '';
+            let communicatingFiles = '';
+            let contactedIPs = '';
+            let contactedDomains = '';
+            let contactedURLs = '';
+            let downloadedFiles = '';
+            let associatedURLs = '';
+            let totalRelations = 0;
+            
             if (result.relational_data) {
-                Object.values(result.relational_data).forEach(relations => {
-                    if (Array.isArray(relations)) {
-                        relationsCount += relations.length;
-                    }
-                });
+                // Associated domains
+                if (result.relational_data.associated_domains) {
+                    associatedDomains = result.relational_data.associated_domains.map(d => d.domain).join(';');
+                    totalRelations += result.relational_data.associated_domains.length;
+                }
+                
+                // Associated IPs
+                if (result.relational_data.associated_ips) {
+                    associatedIPs = result.relational_data.associated_ips.map(ip => ip.ip).join(';');
+                    totalRelations += result.relational_data.associated_ips.length;
+                }
+                
+                // Subdomains
+                if (result.relational_data.subdomains) {
+                    subdomains = result.relational_data.subdomains.map(s => s.subdomain).join(';');
+                    totalRelations += result.relational_data.subdomains.length;
+                }
+                
+                // Communicating files
+                if (result.relational_data.communicating_files) {
+                    communicatingFiles = result.relational_data.communicating_files.map(f => f.full_hash || f.sha256).join(';');
+                    totalRelations += result.relational_data.communicating_files.length;
+                }
+                
+                // Contacted IPs
+                if (result.relational_data.contacted_ips) {
+                    contactedIPs = result.relational_data.contacted_ips.map(ip => ip.ip).join(';');
+                    totalRelations += result.relational_data.contacted_ips.length;
+                }
+                
+                // Contacted domains
+                if (result.relational_data.contacted_domains) {
+                    contactedDomains = result.relational_data.contacted_domains.map(d => d.domain).join(';');
+                    totalRelations += result.relational_data.contacted_domains.length;
+                }
+                
+                // Contacted URLs
+                if (result.relational_data.contacted_urls) {
+                    contactedURLs = result.relational_data.contacted_urls.map(u => u.full_url || u.url).join(';');
+                    totalRelations += result.relational_data.contacted_urls.length;
+                }
+                
+                // Downloaded files
+                if (result.relational_data.downloaded_files) {
+                    downloadedFiles = result.relational_data.downloaded_files.map(f => f.full_hash || f.sha256).join(';');
+                    totalRelations += result.relational_data.downloaded_files.length;
+                }
+                
+                // Associated URLs
+                if (result.relational_data.associated_urls) {
+                    associatedURLs = result.relational_data.associated_urls.map(u => u.full_url || u.url).join(';');
+                    totalRelations += result.relational_data.associated_urls.length;
+                }
             }
             
             return [
@@ -848,8 +1019,21 @@ class IOCAnalyzer {
                 malicious,
                 suspicious,
                 clean,
+                `"${country}"`,
+                `"${asOwner}"`,
+                `"${network}"`,
+                reputation,
                 `"${additionalSources}"`,
-                relationsCount
+                `"${associatedDomains}"`,
+                `"${associatedIPs}"`,
+                `"${subdomains}"`,
+                `"${communicatingFiles}"`,
+                `"${contactedIPs}"`,
+                `"${contactedDomains}"`,
+                `"${contactedURLs}"`,
+                `"${downloadedFiles}"`,
+                `"${associatedURLs}"`,
+                totalRelations
             ].join(',');
         });
 
