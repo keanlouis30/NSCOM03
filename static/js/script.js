@@ -12,6 +12,290 @@ class IOCAnalyzer {
         this.bindEvents();
         this.checkBackendStatus();
         this.loadSavedConfig();
+        this.initApiScores();
+    }
+
+    initApiScores() {
+        // Hardcoded API scores from API_WEIGHTS.md
+        const apiScores = [
+            {
+                name: 'VirusTotal',
+                score: 95,
+                color: '#00ffff',
+                details: {
+                    networkConnectivity: '38/40',
+                    domains: '35/35',
+                    trafficIntel: '22/25',
+                    strengths: [
+                        'Most comprehensive relational data in threat intelligence',
+                        'Network behavior analysis for malware samples',
+                        'Real-time DNS resolution history and subdomain discovery',
+                        'Rich file-to-network relationship mapping',
+                        'Multiple API key rotation support (3 keys configured)'
+                    ],
+                    keyCount: '3 keys (excellent rate limit management)'
+                }
+            },
+            {
+                name: 'IPinfo.io',
+                score: 88,
+                color: '#00cc99',
+                details: {
+                    networkConnectivity: '37/40',
+                    domains: '15/35',
+                    trafficIntel: '11/25',
+                    strengths: [
+                        'Most accurate IP geolocation data available',
+                        'Detailed ISP, carrier, and network infrastructure information',
+                        'ASN details with network ownership and descriptions',
+                        'High API limit (50,000 requests/month free tier)'
+                    ],
+                    specialization: 'Premier service for IP geolocation and network infrastructure intelligence'
+                }
+            },
+            {
+                name: 'SecurityTrails',
+                score: 85,
+                color: '#00aa88',
+                details: {
+                    networkConnectivity: '30/40',
+                    domains: '32/35',
+                    trafficIntel: '8/25',
+                    strengths: [
+                        'Extensive historical DNS data and timeline analysis',
+                        'Comprehensive subdomain enumeration capabilities',
+                        'DNS infrastructure and nameserver intelligence',
+                        'Domain-to-IP relationship tracking over time'
+                    ],
+                    limitations: 'Limited threat intelligence integration, Low monthly quota (50 queries/month free tier)',
+                    specialization: 'Premier service for DNS intelligence and historical analysis'
+                }
+            },
+            {
+                name: 'WhoisXML API',
+                score: 82,
+                color: '#008877',
+                details: {
+                    networkConnectivity: '25/40',
+                    domains: '30/35',
+                    trafficIntel: '5/25',
+                    strengths: [
+                        'Authoritative WHOIS data across all TLDs',
+                        'Domain registration history and registrar intelligence',
+                        'Administrative and technical contact information',
+                        'Domain lifecycle and status tracking'
+                    ],
+                    specialization: 'Premier service for domain registration intelligence'
+                }
+            },
+            {
+                name: 'URLScan.io',
+                score: 78,
+                color: '#006666',
+                details: {
+                    networkConnectivity: '25/40',
+                    domains: '20/35',
+                    trafficIntel: '18/25',
+                    strengths: [
+                        'Comprehensive URL and website behavior analysis',
+                        'Web technology stack detection',
+                        'Visual analysis with screenshots and DOM inspection',
+                        'Network traffic analysis for web resources',
+                        'Unlimited API usage with rate limits (free tier)'
+                    ],
+                    specialization: 'Premier service for URL and web content analysis'
+                }
+            },
+            {
+                name: 'IPQualityScore',
+                score: 76,
+                color: '#005555',
+                details: {
+                    networkConnectivity: '30/40',
+                    domains: '10/35',
+                    trafficIntel: '18/25',
+                    strengths: [
+                        'Advanced fraud and risk scoring algorithms',
+                        'Proxy, VPN, and TOR network detection',
+                        'Bot and crawler identification',
+                        'Recent abuse activity tracking',
+                        'Good API limits (5,000 requests/month free tier)'
+                    ],
+                    specialization: 'Premier service for IP reputation and fraud detection'
+                }
+            },
+            {
+                name: 'AbuseIPDB',
+                score: 75,
+                color: '#004444',
+                details: {
+                    networkConnectivity: '32/40',
+                    domains: '0/35',
+                    trafficIntel: '18/25',
+                    strengths: [
+                        'Specialized in IP abuse and reputation intelligence',
+                        'Community-driven threat reporting with confidence metrics',
+                        'ISP and geolocation context for IPs',
+                        'Excellent for complementing technical analysis with abuse context'
+                    ],
+                    limitations: 'IP-only service (no domain, URL, or hash analysis), Limited network infrastructure details',
+                    keyCount: '2 keys (good rate limit management)'
+                }
+            },
+            {
+                name: 'AlienVault OTX',
+                score: 70,
+                color: '#003333',
+                details: {
+                    networkConnectivity: '28/40',
+                    domains: '25/35',
+                    trafficIntel: '17/25',
+                    strengths: [
+                        'Community threat intelligence platform',
+                        'IOC relationship mapping across multiple indicator types',
+                        'Threat context and campaign attribution data',
+                        'Unlimited API usage (free tier)'
+                    ],
+                    limitations: 'Less comprehensive technical data compared to VirusTotal, Community-sourced data may have variable quality',
+                    keyCount: '2 keys (good redundancy)'
+                }
+            }
+        ];
+
+        this.renderApiScores(apiScores);
+        this.bindApiScoreModal();
+    }
+
+    renderApiScores(scores) {
+        const container = document.getElementById('apiScoresBars');
+        if (!container) return;
+
+        container.innerHTML = '';
+        
+        scores.forEach(api => {
+            const barRow = document.createElement('div');
+            barRow.className = 'bar-row';
+            barRow.setAttribute('data-api', JSON.stringify(api));
+
+            const label = document.createElement('div');
+            label.className = 'bar-label';
+            label.textContent = api.name;
+
+            const bar = document.createElement('div');
+            bar.className = 'bar';
+
+            const barFill = document.createElement('div');
+            barFill.className = 'bar-fill';
+            barFill.style.background = `linear-gradient(90deg, ${api.color}, ${api.color}CC)`;
+            
+            const scoreDiv = document.createElement('div');
+            scoreDiv.className = 'bar-score';
+            scoreDiv.textContent = api.score;
+
+            bar.appendChild(barFill);
+            barRow.appendChild(label);
+            barRow.appendChild(bar);
+            barRow.appendChild(scoreDiv);
+            container.appendChild(barRow);
+
+            // Animate bar fill on load
+            setTimeout(() => {
+                barFill.style.width = `${api.score}%`;
+            }, 100);
+
+            // Click handler for modal
+            barRow.addEventListener('click', () => {
+                this.showApiScoreModal(api);
+            });
+        });
+    }
+
+    bindApiScoreModal() {
+        const closeBtn = document.getElementById('closeApiScoreModal');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                this.hideApiScoreModal();
+            });
+        }
+
+        // Close modal on background click
+        const modal = document.getElementById('apiScoreModal');
+        if (modal) {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    this.hideApiScoreModal();
+                }
+            });
+        }
+    }
+
+    showApiScoreModal(api) {
+        const modal = document.getElementById('apiScoreModal');
+        const title = document.getElementById('apiScoreTitle');
+        const body = document.getElementById('apiScoreBody');
+
+        if (!modal || !title || !body) return;
+
+        title.textContent = `${api.name} - Score: ${api.score}/100`;
+
+        let html = `
+            <div style="background: linear-gradient(135deg, rgba(0,255,255,0.05), rgba(0,136,204,0.05)); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid rgba(0,255,255,0.1);">
+                <h4 style="color: #00ffff; margin-bottom: 0.5rem;">📊 Data Coverage</h4>
+                <div style="margin-left: 1rem; color: #e0e0e0;">
+                    <p><strong>Network Connectivity (40% weight):</strong> ${api.details.networkConnectivity}</p>
+                    <p><strong>Domains (35% weight):</strong> ${api.details.domains}</p>
+                    <p><strong>Traffic Intelligence (25% weight):</strong> ${api.details.trafficIntel}</p>
+                </div>
+            </div>
+        `;
+
+        if (api.details.strengths) {
+            html += `
+                <div style="background: linear-gradient(135deg, rgba(0,255,0,0.05), rgba(0,200,0,0.05)); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid rgba(0,255,0,0.1);">
+                    <h4 style="color: #00ff00; margin-bottom: 0.5rem;">✅ Strengths</h4>
+                    <ul style="margin-left: 1.5rem; color: #e0e0e0; text-align: left;">
+                        ${api.details.strengths.map(s => `<li style="margin-bottom: 0.3rem;">${s}</li>`).join('')}
+                    </ul>
+                </div>
+            `;
+        }
+
+        if (api.details.limitations) {
+            html += `
+                <div style="background: linear-gradient(135deg, rgba(255,165,0,0.05), rgba(200,130,0,0.05)); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid rgba(255,165,0,0.1);">
+                    <h4 style="color: #ffa500; margin-bottom: 0.5rem;">⚠️ Limitations</h4>
+                    <p style="margin-left: 1rem; color: #e0e0e0;">${api.details.limitations}</p>
+                </div>
+            `;
+        }
+
+        if (api.details.specialization) {
+            html += `
+                <div style="background: linear-gradient(135deg, rgba(138,43,226,0.05), rgba(128,0,128,0.05)); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid rgba(138,43,226,0.1);">
+                    <h4 style="color: #ba55d3; margin-bottom: 0.5rem;">🎯 Specialization</h4>
+                    <p style="margin-left: 1rem; color: #e0e0e0;">${api.details.specialization}</p>
+                </div>
+            `;
+        }
+
+        if (api.details.keyCount) {
+            html += `
+                <div style="background: linear-gradient(135deg, rgba(0,191,255,0.05), rgba(0,136,204,0.05)); padding: 1rem; border-radius: 8px; border: 1px solid rgba(0,191,255,0.1);">
+                    <h4 style="color: #00bfff; margin-bottom: 0.5rem;">🔑 API Key Coverage</h4>
+                    <p style="margin-left: 1rem; color: #e0e0e0;">${api.details.keyCount}</p>
+                </div>
+            `;
+        }
+
+        body.innerHTML = html;
+        modal.classList.add('show');
+    }
+
+    hideApiScoreModal() {
+        const modal = document.getElementById('apiScoreModal');
+        if (modal) {
+            modal.classList.remove('show');
+        }
     }
 
     bindEvents() {
@@ -1139,12 +1423,13 @@ class IOCAnalyzer {
         }, 100);
     }
 
+
     escapeHtml(unsafe) {
         return unsafe
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
+            .replace(/\"/g, "&quot;")
             .replace(/'/g, "&#039;");
     }
 }

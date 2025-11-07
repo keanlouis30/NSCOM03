@@ -568,6 +568,50 @@ body {
     font-size: 0.95rem;
 }
 
+/* API Bars */
+.api-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.api-bars .bar-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    padding: 6px 4px;
+    border-radius: 8px;
+    transition: background 0.2s ease;
+}
+.api-bars .bar-row:hover {
+    background: rgba(0, 255, 255, 0.06);
+}
+.api-bars .bar-label {
+    width: 180px;
+    min-width: 160px;
+    color: #fff;
+    font-weight: 600;
+}
+.api-bars .bar {
+    flex: 1;
+    height: 20px;
+    background: linear-gradient(135deg, rgba(0,255,255,0.05), rgba(0,136,204,0.05));
+    border: 1px solid rgba(0,255,255,0.25);
+    border-radius: 8px;
+    overflow: hidden;
+}
+.api-bars .bar-fill {
+    height: 100%;
+    width: 0%;
+    transition: width 0.6s ease;
+}
+.api-bars .bar-score {
+    width: 48px;
+    text-align: right;
+    color: #ccc;
+    font-weight: 600;
+}
+
 /* Export Options */
 .export-options {
     display: flex;

@@ -25,6 +25,289 @@
 
     <main class="main">
         <div class="container">
+            <!-- API Scores Section -->
+            <section class="results-section" id="apiScoresSection">
+                <div class="section-header">
+                    <h2><i class="fas fa-chart-bar"></i> API Scores</h2>
+                    <p>Scores derived from API_WEIGHTS.md (0–100). Click a bar to see the reasoning.</p>
+                </div>
+                <div id="apiScoresBars" class="api-bars">
+                    <!-- Bars will be rendered here -->
+                </div>
+            </section>
+            
+            <script>
+            // Standalone API Scores - Runs immediately
+            (function() {
+                const apiData = [
+                    {
+                        name: 'VirusTotal',
+                        score: 95,
+                        color: '#00ffff',
+                        networkConnectivity: '38/40',
+                        domains: '35/35',
+                        trafficIntel: '22/25',
+                        strengths: [
+                            'Most comprehensive relational data in threat intelligence',
+                            'Network behavior analysis for malware samples',
+                            'Real-time DNS resolution history and subdomain discovery',
+                            'Rich file-to-network relationship mapping',
+                            'Multiple API key rotation support (3 keys configured)'
+                        ],
+                        keyCount: '3 keys (excellent rate limit management)'
+                    },
+                    {
+                        name: 'IPinfo.io',
+                        score: 88,
+                        color: '#00cc99',
+                        networkConnectivity: '37/40',
+                        domains: '15/35',
+                        trafficIntel: '11/25',
+                        strengths: [
+                            'Most accurate IP geolocation data available',
+                            'Detailed ISP, carrier, and network infrastructure information',
+                            'ASN details with network ownership and descriptions',
+                            'High API limit (50,000 requests/month free tier)'
+                        ],
+                        specialization: 'Premier service for IP geolocation and network infrastructure intelligence'
+                    },
+                    {
+                        name: 'SecurityTrails',
+                        score: 85,
+                        color: '#00aa88',
+                        networkConnectivity: '30/40',
+                        domains: '32/35',
+                        trafficIntel: '8/25',
+                        strengths: [
+                            'Extensive historical DNS data and timeline analysis',
+                            'Comprehensive subdomain enumeration capabilities',
+                            'DNS infrastructure and nameserver intelligence',
+                            'Domain-to-IP relationship tracking over time'
+                        ],
+                        limitations: 'Limited threat intelligence integration, Low monthly quota (50 queries/month free tier)',
+                        specialization: 'Premier service for DNS intelligence and historical analysis'
+                    },
+                    {
+                        name: 'WhoisXML API',
+                        score: 82,
+                        color: '#008877',
+                        networkConnectivity: '25/40',
+                        domains: '30/35',
+                        trafficIntel: '5/25',
+                        strengths: [
+                            'Authoritative WHOIS data across all TLDs',
+                            'Domain registration history and registrar intelligence',
+                            'Administrative and technical contact information',
+                            'Domain lifecycle and status tracking'
+                        ],
+                        specialization: 'Premier service for domain registration intelligence'
+                    },
+                    {
+                        name: 'URLScan.io',
+                        score: 78,
+                        color: '#006666',
+                        networkConnectivity: '25/40',
+                        domains: '20/35',
+                        trafficIntel: '18/25',
+                        strengths: [
+                            'Comprehensive URL and website behavior analysis',
+                            'Web technology stack detection',
+                            'Visual analysis with screenshots and DOM inspection',
+                            'Network traffic analysis for web resources',
+                            'Unlimited API usage with rate limits (free tier)'
+                        ],
+                        specialization: 'Premier service for URL and web content analysis'
+                    },
+                    {
+                        name: 'IPQualityScore',
+                        score: 76,
+                        color: '#005555',
+                        networkConnectivity: '30/40',
+                        domains: '10/35',
+                        trafficIntel: '18/25',
+                        strengths: [
+                            'Advanced fraud and risk scoring algorithms',
+                            'Proxy, VPN, and TOR network detection',
+                            'Bot and crawler identification',
+                            'Recent abuse activity tracking',
+                            'Good API limits (5,000 requests/month free tier)'
+                        ],
+                        specialization: 'Premier service for IP reputation and fraud detection'
+                    },
+                    {
+                        name: 'AbuseIPDB',
+                        score: 75,
+                        color: '#004444',
+                        networkConnectivity: '32/40',
+                        domains: '0/35',
+                        trafficIntel: '18/25',
+                        strengths: [
+                            'Specialized in IP abuse and reputation intelligence',
+                            'Community-driven threat reporting with confidence metrics',
+                            'ISP and geolocation context for IPs',
+                            'Excellent for complementing technical analysis with abuse context'
+                        ],
+                        limitations: 'IP-only service (no domain, URL, or hash analysis), Limited network infrastructure details',
+                        keyCount: '2 keys (good rate limit management)'
+                    },
+                    {
+                        name: 'AlienVault OTX',
+                        score: 70,
+                        color: '#003333',
+                        networkConnectivity: '28/40',
+                        domains: '25/35',
+                        trafficIntel: '17/25',
+                        strengths: [
+                            'Community threat intelligence platform',
+                            'IOC relationship mapping across multiple indicator types',
+                            'Threat context and campaign attribution data',
+                            'Unlimited API usage (free tier)'
+                        ],
+                        limitations: 'Less comprehensive technical data compared to VirusTotal, Community-sourced data may have variable quality',
+                        keyCount: '2 keys (good redundancy)'
+                    }
+                ];
+
+                function renderBars() {
+                    const container = document.getElementById('apiScoresBars');
+                    if (!container) {
+                        console.error('apiScoresBars container not found!');
+                        return;
+                    }
+
+                    container.innerHTML = '';
+                    
+                    apiData.forEach(function(api) {
+                        const barRow = document.createElement('div');
+                        barRow.className = 'bar-row';
+                        barRow.style.cssText = 'display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 8px 4px; border-radius: 8px; transition: background 0.2s ease; margin-bottom: 8px;';
+
+                        const label = document.createElement('div');
+                        label.className = 'bar-label';
+                        label.textContent = api.name;
+                        label.style.cssText = 'width: 180px; min-width: 160px; color: #fff; font-weight: 600;';
+
+                        const bar = document.createElement('div');
+                        bar.className = 'bar';
+                        bar.style.cssText = 'flex: 1; height: 24px; background: linear-gradient(135deg, rgba(0,255,255,0.05), rgba(0,136,204,0.05)); border: 1px solid rgba(0,255,255,0.25); border-radius: 8px; overflow: hidden; position: relative;';
+
+                        const barFill = document.createElement('div');
+                        barFill.className = 'bar-fill';
+                        barFill.style.cssText = 'height: 100%; width: ' + api.score + '%; background: linear-gradient(90deg, ' + api.color + ', ' + api.color + 'CC); transition: width 0.8s ease; box-shadow: 0 0 10px ' + api.color + '80;';
+                        
+                        const scoreDiv = document.createElement('div');
+                        scoreDiv.className = 'bar-score';
+                        scoreDiv.textContent = api.score;
+                        scoreDiv.style.cssText = 'width: 48px; text-align: right; color: #ccc; font-weight: 600; font-size: 14px;';
+
+                        bar.appendChild(barFill);
+                        barRow.appendChild(label);
+                        barRow.appendChild(bar);
+                        barRow.appendChild(scoreDiv);
+                        container.appendChild(barRow);
+
+                        // Hover effect
+                        barRow.addEventListener('mouseenter', function() {
+                            barRow.style.background = 'rgba(0, 255, 255, 0.06)';
+                        });
+                        barRow.addEventListener('mouseleave', function() {
+                            barRow.style.background = 'transparent';
+                        });
+
+                        // Click handler
+                        barRow.addEventListener('click', function() {
+                            showModal(api);
+                        });
+                    });
+                    
+                    console.log('API Scores rendered: ' + apiData.length + ' bars created!');
+                }
+
+                function showModal(api) {
+                    const modal = document.getElementById('apiScoreModal');
+                    const title = document.getElementById('apiScoreTitle');
+                    const body = document.getElementById('apiScoreBody');
+
+                    if (!modal || !title || !body) return;
+
+                    title.textContent = api.name + ' - Score: ' + api.score + '/100';
+
+                    var html = '<div style="background: linear-gradient(135deg, rgba(0,255,255,0.05), rgba(0,136,204,0.05)); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid rgba(0,255,255,0.1);">';
+                    html += '<h4 style="color: #00ffff; margin-bottom: 0.5rem;">📊 Data Coverage</h4>';
+                    html += '<div style="margin-left: 1rem; color: #e0e0e0;">';
+                    html += '<p><strong>Network Connectivity (40% weight):</strong> ' + api.networkConnectivity + '</p>';
+                    html += '<p><strong>Domains (35% weight):</strong> ' + api.domains + '</p>';
+                    html += '<p><strong>Traffic Intelligence (25% weight):</strong> ' + api.trafficIntel + '</p>';
+                    html += '</div></div>';
+
+                    if (api.strengths) {
+                        html += '<div style="background: linear-gradient(135deg, rgba(0,255,0,0.05), rgba(0,200,0,0.05)); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid rgba(0,255,0,0.1);">';
+                        html += '<h4 style="color: #00ff00; margin-bottom: 0.5rem;">✅ Strengths</h4>';
+                        html += '<ul style="margin-left: 1.5rem; color: #e0e0e0; text-align: left;">';
+                        api.strengths.forEach(function(s) {
+                            html += '<li style="margin-bottom: 0.3rem;">' + s + '</li>';
+                        });
+                        html += '</ul></div>';
+                    }
+
+                    if (api.limitations) {
+                        html += '<div style="background: linear-gradient(135deg, rgba(255,165,0,0.05), rgba(200,130,0,0.05)); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid rgba(255,165,0,0.1);">';
+                        html += '<h4 style="color: #ffa500; margin-bottom: 0.5rem;">⚠️ Limitations</h4>';
+                        html += '<p style="margin-left: 1rem; color: #e0e0e0;">' + api.limitations + '</p>';
+                        html += '</div>';
+                    }
+
+                    if (api.specialization) {
+                        html += '<div style="background: linear-gradient(135deg, rgba(138,43,226,0.05), rgba(128,0,128,0.05)); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; border: 1px solid rgba(138,43,226,0.1);">';
+                        html += '<h4 style="color: #ba55d3; margin-bottom: 0.5rem;">🎯 Specialization</h4>';
+                        html += '<p style="margin-left: 1rem; color: #e0e0e0;">' + api.specialization + '</p>';
+                        html += '</div>';
+                    }
+
+                    if (api.keyCount) {
+                        html += '<div style="background: linear-gradient(135deg, rgba(0,191,255,0.05), rgba(0,136,204,0.05)); padding: 1rem; border-radius: 8px; border: 1px solid rgba(0,191,255,0.1);">';
+                        html += '<h4 style="color: #00bfff; margin-bottom: 0.5rem;">🔑 API Key Coverage</h4>';
+                        html += '<p style="margin-left: 1rem; color: #e0e0e0;">' + api.keyCount + '</p>';
+                        html += '</div>';
+                    }
+
+                    body.innerHTML = html;
+                    modal.classList.add('show');
+                }
+
+                // Setup modal close handlers
+                function setupModalHandlers() {
+                    const closeBtn = document.getElementById('closeApiScoreModal');
+                    const modal = document.getElementById('apiScoreModal');
+                    
+                    if (closeBtn) {
+                        closeBtn.addEventListener('click', function() {
+                            if (modal) modal.classList.remove('show');
+                        });
+                    }
+                    
+                    if (modal) {
+                        modal.addEventListener('click', function(e) {
+                            if (e.target === modal) {
+                                modal.classList.remove('show');
+                            }
+                        });
+                    }
+                }
+
+                // Run immediately when script loads
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', function() {
+                        renderBars();
+                        setupModalHandlers();
+                    });
+                } else {
+                    renderBars();
+                    setupModalHandlers();
+                }
+            })();
+            </script>
+
             <!-- Input Section -->
             <section class="input-section">
                 <div class="section-header">
@@ -235,6 +518,17 @@
             <p id="modalMessage">Please wait while we check your indicators against threat intelligence databases.</p>
             <div class="progress-bar">
                 <div class="progress-fill" id="progressFill"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- API Score Details Modal -->
+    <div class="modal" id="apiScoreModal">
+        <div class="modal-content" style="max-width: 700px; text-align: left;">
+            <h3 id="apiScoreTitle">API Score</h3>
+            <div id="apiScoreBody"></div>
+            <div style="margin-top: 16px; text-align: right;">
+                <button class="btn btn-secondary" id="closeApiScoreModal">Close</button>
             </div>
         </div>
     </div>

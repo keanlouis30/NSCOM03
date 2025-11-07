@@ -9,6 +9,8 @@ import csv
 from datetime import datetime
 from typing import Dict, List, Any
 from io import StringIO, BytesIO
+import os
+import re
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
@@ -19,11 +21,16 @@ from reportlab.lib.enums import TA_LEFT, TA_CENTER
 class DeepAnalysisReportGenerator:
     """Generate comprehensive reports from deep analysis data"""
     
+    USED_APIS = ['VirusTotal', 'AbuseIPDB', 'IPinfo.io', 'SecurityTrails', 'IPQualityScore']
+    
     def __init__(self):
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Cache parsed API weights to avoid re-reading file repeatedly
+        self._api_weights_cache = None
     
     def generate_json_report(self, analysis_results: List[Dict[str, Any]]) -> str:
         """Generate JSON report"""
+        api_scores, api_details = self._load_api_scores()
         report = {
             'metadata': {
                 'report_type': 'Deep IOC Analysis',
@@ -31,6 +38,8 @@ class DeepAnalysisReportGenerator:
                 'total_iocs': len(analysis_results),
                 'version': '2.0'
             },
+            'api_scores': api_scores,  # numeric map for used APIs
+            'api_score_rationale': api_details,  # per-API criteria (data_coverage/strengths/limitations)
             'analysis_results': analysis_results
         }
         return json.dumps(report, indent=2, default=str)
@@ -41,6 +50,9 @@ class DeepAnalysisReportGenerator:
         
         if not analysis_results:
             return "No data to export"
+        
+        # Load API scores once
+        api_scores, _ = self._load_api_scores()
         
         # Define CSV headers for deep analysis
         headers = [
@@ -65,7 +77,9 @@ class DeepAnalysisReportGenerator:
             'Contacted IPs (Hash)', 'Contacted Domains (Hash)', 'Contacted URLs (Hash)',
             'VT Malicious Count', 'VT Suspicious Count', 'VT Clean Count',
             # Additional
-            'Web Technology', 'Domain Age (days)'
+            'Web Technology', 'Domain Age (days)',
+            # API Scores (used)
+            'API Score - VirusTotal', 'API Score - AbuseIPDB', 'API Score - IPinfo.io', 'API Score - SecurityTrails', 'API Score - IPQualityScore'
         ]
         
         writer = csv.DictWriter(output, fieldnames=headers, extrasaction='ignore')
@@ -73,6 +87,12 @@ class DeepAnalysisReportGenerator:
         
         for result in analysis_results:
             row = self._flatten_result_for_csv(result)
+            # Append API scores to row
+            row['API Score - VirusTotal'] = api_scores.get('VirusTotal', '')
+            row['API Score - AbuseIPDB'] = api_scores.get('AbuseIPDB', '')
+            row['API Score - IPinfo.io'] = api_scores.get('IPinfo.io', '')
+            row['API Score - SecurityTrails'] = api_scores.get('SecurityTrails', '')
+            row['API Score - IPQualityScore'] = api_scores.get('IPQualityScore', '')
             writer.writerow(row)
         
         return output.getvalue()
@@ -244,6 +264,9 @@ class DeepAnalysisReportGenerator:
         story = []
         styles = getSampleStyleSheet()
         
+        # Load API scores/details
+        api_scores, api_details = self._load_api_scores()
+        
         # Custom styles
         title_style = ParagraphStyle(
             'CustomTitle',
@@ -288,6 +311,42 @@ class DeepAnalysisReportGenerator:
         
         story.append(meta_table)
         story.append(Spacer(1, 0.3*inch))
+        
+        # API Scores Section
+        if api_scores:
+            story.append(Paragraph("API Scores (from API_WEIGHTS.md)", heading_style))
+            # Build table of scores
+            header = ['API', 'Score']
+            rows = [[api, str(score)] for api, score in sorted(api_scores.items(), key=lambda x: -x[1])]
+            scores_table = Table([header] + rows, colWidths=[3*inch, 3*inch])
+            scores_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#ecf0f1')),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                ('ALIGN', (1,1), (1,-1), 'CENTER'),
+            ]))
+            story.append(scores_table)
+            story.append(Spacer(1, 0.2*inch))
+
+            # Criteria per API (Data Coverage, Strengths, Limitations)
+            for api, detail in sorted(api_details.items(), key=lambda x: -api_scores.get(x[0], 0)):
+                story.append(Paragraph(f"<b>{api} — Score: {detail.get('score','N/A')}/100</b>", styles['Heading3']))
+                # Data Coverage bullets
+                dc = detail.get('data_coverage', [])
+                if dc:
+                    story.append(Paragraph("<i>Data Coverage</i>", styles['Normal']))
+                    story.append(Paragraph('<br/>'.join([f"• {self._escape_html(x)}" for x in dc]), styles['Normal']))
+                # Strengths
+                st = detail.get('strengths', [])
+                if st:
+                    story.append(Paragraph("<i>Strengths</i>", styles['Normal']))
+                    story.append(Paragraph('<br/>'.join([f"• {self._escape_html(x)}" for x in st]), styles['Normal']))
+                # Limitations
+                lm = detail.get('limitations', [])
+                if lm:
+                    story.append(Paragraph("<i>Limitations</i>", styles['Normal']))
+                    story.append(Paragraph('<br/>'.join([f"• {self._escape_html(x)}" for x in lm]), styles['Normal']))
+                story.append(Spacer(1, 0.15*inch))
         
         # Add analysis results for each IOC
         for idx, result in enumerate(analysis_results, 1):
@@ -417,4 +476,68 @@ class DeepAnalysisReportGenerator:
     def get_filename(self, format_type: str) -> str:
         """Generate filename for report"""
         return f"deep_analysis_report_{self.timestamp}.{format_type}"
+
+    # =================== API Weights Parsing ===================
+    def _load_api_scores(self):
+        """Return (scores_map, details_map) for USED_APIS from API_WEIGHTS.md"""
+        if self._api_weights_cache is not None:
+            return self._api_weights_cache
+        try:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            md_path = os.path.join(base_dir, 'API_WEIGHTS.md')
+            with open(md_path, 'r', encoding='utf-8') as f:
+                md = f.read()
+            scores, details = self._parse_api_weights_md(md)
+            # Filter to used APIs only
+            filtered_scores = {k: v for k, v in scores.items() if k in self.USED_APIS}
+            filtered_details = {k: v for k, v in details.items() if k in self.USED_APIS}
+            self._api_weights_cache = (filtered_scores, filtered_details)
+            return self._api_weights_cache
+        except Exception:
+            # Fallback to empty if not available
+            self._api_weights_cache = ({}, {})
+            return self._api_weights_cache
+
+    def _parse_api_weights_md(self, md: str):
+        """Parse API_WEIGHTS.md and return (scores_map, details_map)."""
+        scores: Dict[str, int] = {}
+        details: Dict[str, Dict[str, Any]] = {}
+        # Find sections like: #### Name - **Score: NN/100**
+        pattern = re.compile(r'^####\s+(.+?)\s+-\s+\*\*Score:\s*(\d{1,3})/100\*\*', re.MULTILINE)
+        matches = list(pattern.finditer(md))
+        for i, m in enumerate(matches):
+            name = m.group(1).strip()
+            score = int(m.group(2))
+            start = m.end()
+            end = matches[i+1].start() if i+1 < len(matches) else len(md)
+            block = md[start:end]
+            # Extract sections
+            def extract(title: str) -> List[str]:
+                sec_re = re.compile(rf'^\*\*{re.escape(title)}\*\*:\n([\s\S]*?)(?:\n\*\*|$)', re.MULTILINE)
+                sm = sec_re.search(block)
+                if not sm:
+                    return []
+                body = sm.group(1)
+                lines = []
+                for line in body.splitlines():
+                    line = line.strip()
+                    if line.startswith('-'):
+                        lines.append(line.lstrip('- ').strip())
+                return lines
+            data_coverage = extract('Data Coverage')
+            strengths = extract('Strengths')
+            limitations = extract('Limitations')
+            scores[name] = score
+            details[name] = {
+                'score': score,
+                'data_coverage': data_coverage,
+                'strengths': strengths,
+                'limitations': limitations,
+            }
+        return scores, details
+
+    def _escape_html(self, text: str) -> str:
+        return (text.replace('&', '&amp;')
+                    .replace('<', '&lt;')
+                    .replace('>', '&gt;'))
 
